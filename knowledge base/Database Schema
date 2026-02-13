@@ -1,0 +1,1161 @@
+-- ==========================================
+-- NORMALIZED MULTI-TENANT CRM - SUPABASE VERSION
+-- MULTI-ASSIGNMENT UPGRADE
+-- ==========================================
+-- Replaced 'assignedTo' column with pivot tables
+-- All PKs are UUID with gen_random_uuid()
+-- Single quotes preserve camelCase in Supabase
+-- ==========================================
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- ==========================================
+-- PLATFORM LAYER
+-- ==========================================
+
+CREATE TABLE "superadmins" (
+  "superadminId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "authUserId" UUID NOT NULL UNIQUE REFERENCES auth.users("id") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "avatar" VARCHAR(255) NULL DEFAULT NULL,
+  "lang" VARCHAR(10) NOT NULL DEFAULT 'en',
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_superadmins_auth_user_id" ON "superadmins"("authUserId");
+CREATE INDEX "idx_superadmins_status" ON "superadmins"("status");
+
+CREATE TABLE "plans" (
+  "planId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "name" VARCHAR(100) NOT NULL UNIQUE,
+  "price" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  "yearlyPrice" DECIMAL(10,2) NULL DEFAULT NULL,
+  "duration" VARCHAR(50) NOT NULL,
+  "maxUsers" INT NOT NULL DEFAULT 0,
+  "maxProjects" INT NOT NULL DEFAULT 0,
+  "maxContacts" INT NOT NULL DEFAULT 0,
+  "maxAccounts" INT NOT NULL DEFAULT 0,
+  "storageLimit" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "enableBranding" BOOLEAN NOT NULL DEFAULT TRUE,
+  "enableChatgpt" BOOLEAN NOT NULL DEFAULT TRUE,
+  "isTrial" BOOLEAN NOT NULL DEFAULT FALSE,
+  "trialDays" INT NOT NULL DEFAULT 0,
+  "isActive" BOOLEAN NOT NULL DEFAULT TRUE,
+  "isDefault" BOOLEAN NOT NULL DEFAULT FALSE,
+  "modules" JSONB NULL DEFAULT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_plans_is_active" ON "plans"("isActive");
+CREATE INDEX "idx_plans_is_default" ON "plans"("isDefault");
+
+CREATE TABLE "currencies" (
+  "currencyId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "name" VARCHAR(255) NOT NULL,
+  "code" VARCHAR(10) NOT NULL UNIQUE,
+  "symbol" VARCHAR(10) NULL DEFAULT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "isDefault" BOOLEAN NOT NULL DEFAULT FALSE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_currencies_code" ON "currencies"("code");
+CREATE INDEX "idx_currencies_is_default" ON "currencies"("isDefault");
+
+CREATE TABLE "companies" (
+  "companyId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "name" VARCHAR(255) NOT NULL,
+  "email" VARCHAR(255) NOT NULL,
+  "phone" VARCHAR(50) NULL DEFAULT NULL,
+  "website" VARCHAR(255) NULL DEFAULT NULL,
+  "logo" VARCHAR(255) NULL DEFAULT NULL,
+  "address" TEXT NULL DEFAULT NULL,
+  "city" VARCHAR(100) NULL DEFAULT NULL,
+  "state" VARCHAR(100) NULL DEFAULT NULL,
+  "postalCode" VARCHAR(20) NULL DEFAULT NULL,
+  "country" VARCHAR(100) NULL DEFAULT NULL,
+  "lang" VARCHAR(10) NOT NULL DEFAULT 'en',
+  "mode" VARCHAR(20) NOT NULL DEFAULT 'light',
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive', 'suspended')),
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_companies_email" ON "companies"("email");
+CREATE INDEX "idx_companies_status" ON "companies"("status");
+
+CREATE TABLE "subscriptions" (
+  "subscriptionId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "planId" UUID NOT NULL REFERENCES "plans"("planId") ON DELETE RESTRICT,
+  "billingCycle" VARCHAR(50) NOT NULL DEFAULT 'monthly',
+  "startDate" DATE NOT NULL,
+  "expiryDate" DATE NULL DEFAULT NULL,
+  "isTrial" BOOLEAN NOT NULL DEFAULT FALSE,
+  "trialExpiryDate" DATE NULL DEFAULT NULL,
+  "isActive" BOOLEAN NOT NULL DEFAULT TRUE,
+  "storageUsed" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "storageLimit" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "autoRenew" BOOLEAN NOT NULL DEFAULT TRUE,
+  "cancelledAt" TIMESTAMPTZ NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_subscriptions_company_id" ON "subscriptions"("companyId");
+CREATE INDEX "idx_subscriptions_plan_id" ON "subscriptions"("planId");
+CREATE INDEX "idx_subscriptions_is_active" ON "subscriptions"("isActive");
+CREATE INDEX "idx_subscriptions_expiry_date" ON "subscriptions"("expiryDate");
+
+CREATE TABLE "planOrders" (
+  "planOrderId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "planId" UUID NOT NULL REFERENCES "plans"("planId") ON DELETE CASCADE,
+  "couponId" UUID NULL DEFAULT NULL,
+  "orderNumber" VARCHAR(255) NOT NULL UNIQUE,
+  "billingCycle" VARCHAR(50) NOT NULL,
+  "originalPrice" DECIMAL(10,2) NOT NULL,
+  "discountAmount" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  "finalPrice" DECIMAL(10,2) NOT NULL,
+  "couponCode" VARCHAR(255) NULL DEFAULT NULL,
+  "paymentMethod" VARCHAR(50) NULL DEFAULT NULL,
+  "paymentId" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK ("status" IN ('pending', 'approved', 'rejected', 'cancelled')),
+  "orderedAt" TIMESTAMPTZ NOT NULL,
+  "processedAt" TIMESTAMPTZ NULL DEFAULT NULL,
+  "processedBy" UUID NULL DEFAULT NULL REFERENCES "superadmins"("superadminId") ON DELETE SET NULL,
+  "notes" TEXT NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_plan_orders_company_id" ON "planOrders"("companyId");
+CREATE INDEX "idx_plan_orders_status" ON "planOrders"("status");
+CREATE INDEX "idx_plan_orders_ordered_at" ON "planOrders"("orderedAt");
+
+CREATE TABLE "planRequests" (
+  "planRequestId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "planId" UUID NOT NULL REFERENCES "plans"("planId") ON DELETE CASCADE,
+  "billingCycle" VARCHAR(50) NOT NULL DEFAULT 'monthly',
+  "message" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK ("status" IN ('pending', 'approved', 'rejected')),
+  "requestedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "processedAt" TIMESTAMPTZ NULL DEFAULT NULL,
+  "processedBy" UUID NULL DEFAULT NULL REFERENCES "superadmins"("superadminId") ON DELETE SET NULL,
+  "notes" TEXT NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_plan_requests_company_id" ON "planRequests"("companyId");
+CREATE INDEX "idx_plan_requests_status" ON "planRequests"("status");
+CREATE INDEX "idx_plan_requests_requested_at" ON "planRequests"("requestedAt");
+
+CREATE TABLE "coupons" (
+  "couponId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "name" VARCHAR(255) NOT NULL,
+  "code" VARCHAR(255) NOT NULL UNIQUE,
+  "type" VARCHAR(20) NOT NULL CHECK ("type" IN ('percentage', 'flat')),
+  "discountAmount" DECIMAL(10,2) NOT NULL,
+  "minimumSpend" DECIMAL(10,2) NULL DEFAULT NULL,
+  "maximumSpend" DECIMAL(10,2) NULL DEFAULT NULL,
+  "useLimitPerCoupon" INT NULL DEFAULT NULL,
+  "useLimitPerCompany" INT NULL DEFAULT NULL,
+  "expiryDate" DATE NULL DEFAULT NULL,
+  "codeType" VARCHAR(20) NOT NULL DEFAULT 'manual' CHECK ("codeType" IN ('manual', 'auto')),
+  "status" BOOLEAN NOT NULL DEFAULT TRUE,
+  "createdBy" UUID NOT NULL REFERENCES "superadmins"("superadminId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_coupons_code" ON "coupons"("code");
+CREATE INDEX "idx_coupons_status" ON "coupons"("status");
+
+CREATE TABLE "landingPageSettings" (
+  "landingPageSettingId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyName" VARCHAR(255) NOT NULL DEFAULT 'Sales SaaS',
+  "contactEmail" VARCHAR(255) NOT NULL DEFAULT 'support@sales.com',
+  "contactPhone" VARCHAR(50) NOT NULL DEFAULT '+1 (555) 123-4567',
+  "contactAddress" VARCHAR(255) NOT NULL DEFAULT 'San Francisco, CA',
+  "configSections" JSONB NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ==========================================
+-- TENANT / COMPANY LAYER
+-- ==========================================
+
+create table public.users (
+  "userId" uuid not null default gen_random_uuid (),
+  "authUserId" uuid not null,
+  "companyId" uuid null,
+  name character varying(255) not null,
+  avatar character varying(255) null default null::character varying,
+  lang character varying(10) not null default 'en'::character varying,
+  mode character varying(20) not null default 'light'::character varying,
+  "google2faEnable" boolean not null default false,
+  "google2faSecret" text null,
+  status character varying(20) not null default 'active'::character varying,
+  "isEnableLogin" boolean not null default true,
+  "createdBy" uuid null,
+  "createdAt" timestamp with time zone null default now(),
+  "updatedAt" timestamp with time zone null default now(),
+  email character varying(255) null,
+  constraint users_pkey primary key ("userId"),
+  constraint users_authUserId_key unique ("authUserId"),
+  constraint users_authUserId_fkey foreign KEY ("authUserId") references auth.users (id) on delete CASCADE,
+  constraint users_companyId_fkey foreign KEY ("companyId") references companies ("companyId") on delete CASCADE,
+  constraint users_createdBy_fkey foreign KEY ("createdBy") references users ("userId") on delete set null,
+  constraint users_status_check check (
+    (
+      (status)::text = any (
+        (
+          array[
+            'active'::character varying,
+            'inactive'::character varying
+          ]
+        )::text[]
+      )
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists idx_users_auth_user_id on public.users using btree ("authUserId") TABLESPACE pg_default;
+
+create index IF not exists idx_users_company_id on public.users using btree ("companyId") TABLESPACE pg_default;
+
+create index IF not exists idx_users_status on public.users using btree (status) TABLESPACE pg_default;
+
+create index IF not exists idx_users_created_by on public.users using btree ("createdBy") TABLESPACE pg_default;
+
+create index IF not exists idx_users_auth_user_id on public.users using btree ("authUserId") TABLESPACE pg_default;
+
+create index IF not exists idx_users_company_id on public.users using btree ("companyId") TABLESPACE pg_default;
+
+create index IF not exists idx_users_status on public.users using btree (status) TABLESPACE pg_default;
+
+create index IF not exists idx_users_created_by on public.users using btree ("createdBy") TABLESPACE pg_default;
+
+create index IF not exists idx_users_auth_user_id on public.users using btree ("authUserId") TABLESPACE pg_default;
+
+create index IF not exists idx_users_company_id on public.users using btree ("companyId") TABLESPACE pg_default;
+
+create index IF not exists idx_users_status on public.users using btree (status) TABLESPACE pg_default;
+
+create index IF not exists idx_users_created_by on public.users using btree ("createdBy") TABLESPACE pg_default;
+
+CREATE INDEX "idx_users_auth_user_id" ON "users"("authUserId");
+CREATE INDEX "idx_users_company_id" ON "users"("companyId");
+CREATE INDEX "idx_users_status" ON "users"("status");
+CREATE INDEX "idx_users_created_by" ON "users"("createdBy");
+
+CREATE TABLE "roles" (
+  "roleId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(125) NOT NULL,
+  "guardName" VARCHAR(125) NOT NULL DEFAULT 'web',
+  "label" VARCHAR(255) NULL DEFAULT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "createdBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE("companyId", "name")
+);
+
+CREATE INDEX "idx_roles_company_id" ON "roles"("companyId");
+
+CREATE TABLE "permissions" (
+  "permissionId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "module" VARCHAR(255) NULL DEFAULT NULL,
+  "name" VARCHAR(125) NOT NULL UNIQUE,
+  "guardName" VARCHAR(125) NOT NULL DEFAULT 'web',
+  "label" VARCHAR(255) NULL DEFAULT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_permissions_module" ON "permissions"("module");
+
+CREATE TABLE "userRoles" (
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "roleId" UUID NOT NULL REFERENCES "roles"("roleId") ON DELETE CASCADE,
+  PRIMARY KEY ("userId", "roleId")
+);
+
+CREATE INDEX "idx_user_roles_user_id" ON "userRoles"("userId");
+CREATE INDEX "idx_user_roles_role_id" ON "userRoles"("roleId");
+
+CREATE TABLE "rolePermissions" (
+  "roleId" UUID NOT NULL REFERENCES "roles"("roleId") ON DELETE CASCADE,
+  "permissionId" UUID NOT NULL REFERENCES "permissions"("permissionId") ON DELETE CASCADE,
+  PRIMARY KEY ("roleId", "permissionId")
+);
+
+CREATE INDEX "idx_role_permissions_role_id" ON "rolePermissions"("roleId");
+CREATE INDEX "idx_role_permissions_permission_id" ON "rolePermissions"("permissionId");
+
+CREATE TABLE "settings" (
+  "settingId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "key" VARCHAR(255) NOT NULL,
+  "value" TEXT NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE("companyId", "key")
+);
+
+CREATE INDEX "idx_settings_company_id" ON "settings"("companyId");
+
+-- ==========================================
+-- CRM BUSINESS DATA - LEAD MANAGEMENT
+-- ==========================================
+
+CREATE TABLE "leadStatuses" (
+  "leadStatusId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "color" VARCHAR(7) NOT NULL DEFAULT '#3B82F6',
+  "description" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_lead_statuses_company_id" ON "leadStatuses"("companyId");
+CREATE INDEX "idx_lead_statuses_status" ON "leadStatuses"("status");
+
+CREATE TABLE "leadSources" (
+  "leadSourceId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_lead_sources_company_id" ON "leadSources"("companyId");
+CREATE INDEX "idx_lead_sources_status" ON "leadSources"("status");
+
+CREATE TABLE "leads" (
+  "leadId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "email" VARCHAR(255) NULL DEFAULT NULL,
+  "phone" VARCHAR(50) NULL DEFAULT NULL,
+  "companyName" VARCHAR(255) NULL DEFAULT NULL,
+  "accountIndustryId" UUID NULL DEFAULT NULL,
+  "website" VARCHAR(255) NULL DEFAULT NULL,
+  "position" VARCHAR(255) NULL DEFAULT NULL,
+  "address" TEXT NULL DEFAULT NULL,
+  "notes" TEXT NULL DEFAULT NULL,
+  "value" DECIMAL(15,2) NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "isConverted" BOOLEAN NOT NULL DEFAULT FALSE,
+  "leadStatusId" UUID NULL DEFAULT NULL REFERENCES "leadStatuses"("leadStatusId") ON DELETE SET NULL,
+  "leadSourceId" UUID NULL DEFAULT NULL REFERENCES "leadSources"("leadSourceId") ON DELETE SET NULL,
+  "campaignId" UUID NULL DEFAULT NULL,
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_leads_company_id" ON "leads"("companyId");
+CREATE INDEX "idx_leads_status" ON "leads"("status");
+CREATE INDEX "idx_leads_is_converted" ON "leads"("isConverted");
+CREATE INDEX "idx_leads_created_by" ON "leads"("createdBy");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "leadAssignments" (
+  "leadId" UUID NOT NULL REFERENCES "leads"("leadId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("leadId", "userId")
+);
+
+CREATE INDEX "idx_lead_assignments_user_id" ON "leadAssignments"("userId");
+CREATE INDEX "idx_lead_assignments_assigned_by" ON "leadAssignments"("assignedBy");
+
+CREATE TABLE "leadActivities" (
+  "leadActivityId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "leadId" UUID NOT NULL REFERENCES "leads"("leadId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "activityType" VARCHAR(50) NOT NULL,
+  "title" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "oldValues" JSONB NULL DEFAULT NULL,
+  "newValues" JSONB NULL DEFAULT NULL,
+  "fieldChanged" VARCHAR(255) NULL DEFAULT NULL,
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_lead_activities_lead_id" ON "leadActivities"("leadId");
+CREATE INDEX "idx_lead_activities_created_by" ON "leadActivities"("createdBy");
+
+CREATE TABLE "leadComments" (
+  "leadCommentId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "leadId" UUID NOT NULL REFERENCES "leads"("leadId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "comment" TEXT NOT NULL,
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_lead_comments_lead_id" ON "leadComments"("leadId");
+CREATE INDEX "idx_lead_comments_created_by" ON "leadComments"("createdBy");
+
+-- ==========================================
+-- CRM BUSINESS DATA - ACCOUNT MANAGEMENT
+-- ==========================================
+
+CREATE TABLE "accountTypes" (
+  "accountTypeId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "color" VARCHAR(7) NOT NULL DEFAULT '#3B82F6',
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_account_types_company_id" ON "accountTypes"("companyId");
+CREATE INDEX "idx_account_types_status" ON "accountTypes"("status");
+
+CREATE TABLE "accountIndustries" (
+  "accountIndustryId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "color" VARCHAR(7) NOT NULL DEFAULT '#3B82F6',
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_account_industries_company_id" ON "accountIndustries"("companyId");
+CREATE INDEX "idx_account_industries_status" ON "accountIndustries"("status");
+
+CREATE TABLE "accounts" (
+  "accountId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "email" VARCHAR(255) NULL DEFAULT NULL,
+  "phone" VARCHAR(50) NULL DEFAULT NULL,
+  "website" VARCHAR(255) NULL DEFAULT NULL,
+  "billingAddress" TEXT NULL DEFAULT NULL,
+  "billingCity" VARCHAR(100) NULL DEFAULT NULL,
+  "billingState" VARCHAR(100) NULL DEFAULT NULL,
+  "billingPostalCode" VARCHAR(20) NULL DEFAULT NULL,
+  "billingCountry" VARCHAR(100) NULL DEFAULT NULL,
+  "shippingAddress" TEXT NULL DEFAULT NULL,
+  "shippingCity" VARCHAR(100) NULL DEFAULT NULL,
+  "shippingState" VARCHAR(100) NULL DEFAULT NULL,
+  "shippingPostalCode" VARCHAR(20) NULL DEFAULT NULL,
+  "shippingCountry" VARCHAR(100) NULL DEFAULT NULL,
+  "accountTypeId" UUID NULL DEFAULT NULL REFERENCES "accountTypes"("accountTypeId") ON DELETE SET NULL,
+  "accountIndustryId" UUID NULL DEFAULT NULL REFERENCES "accountIndustries"("accountIndustryId") ON DELETE SET NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_accounts_company_id" ON "accounts"("companyId");
+CREATE INDEX "idx_accounts_status" ON "accounts"("status");
+CREATE INDEX "idx_accounts_created_by" ON "accounts"("createdBy");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "accountAssignments" (
+  "accountId" UUID NOT NULL REFERENCES "accounts"("accountId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("accountId", "userId")
+);
+
+CREATE TABLE "contacts" (
+  "contactId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "accountId" UUID NOT NULL REFERENCES "accounts"("accountId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "email" VARCHAR(255) NULL DEFAULT NULL,
+  "phone" VARCHAR(50) NULL DEFAULT NULL,
+  "position" VARCHAR(255) NULL DEFAULT NULL,
+  "address" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_contacts_company_id" ON "contacts"("companyId");
+CREATE INDEX "idx_contacts_account_id" ON "contacts"("accountId");
+CREATE INDEX "idx_contacts_status" ON "contacts"("status");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "contactAssignments" (
+  "contactId" UUID NOT NULL REFERENCES "contacts"("contactId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("contactId", "userId")
+);
+
+-- ==========================================
+-- CRM BUSINESS DATA - OPPORTUNITY MANAGEMENT
+-- ==========================================
+
+CREATE TABLE "opportunityStages" (
+  "opportunityStageId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "color" VARCHAR(7) NOT NULL DEFAULT '#3B82F6',
+  "probability" INT NOT NULL DEFAULT 0,
+  "description" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_opportunity_stages_company_id" ON "opportunityStages"("companyId");
+CREATE INDEX "idx_opportunity_stages_status" ON "opportunityStages"("status");
+
+CREATE TABLE "opportunitySources" (
+  "opportunitySourceId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_opportunity_sources_company_id" ON "opportunitySources"("companyId");
+CREATE INDEX "idx_opportunity_sources_status" ON "opportunitySources"("status");
+
+CREATE TABLE "opportunities" (
+  "opportunityId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "accountId" UUID NOT NULL REFERENCES "accounts"("accountId") ON DELETE CASCADE,
+  "contactId" UUID NULL DEFAULT NULL REFERENCES "contacts"("contactId") ON DELETE SET NULL,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "amount" DECIMAL(15,2) NULL DEFAULT NULL,
+  "closeDate" DATE NULL DEFAULT NULL,
+  "notes" TEXT NULL DEFAULT NULL,
+  "opportunityStageId" UUID NOT NULL REFERENCES "opportunityStages"("opportunityStageId") ON DELETE RESTRICT,
+  "opportunitySourceId" UUID NOT NULL REFERENCES "opportunitySources"("opportunitySourceId") ON DELETE RESTRICT,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_opportunities_company_id" ON "opportunities"("companyId");
+CREATE INDEX "idx_opportunities_account_id" ON "opportunities"("accountId");
+CREATE INDEX "idx_opportunities_status" ON "opportunities"("status");
+CREATE INDEX "idx_opportunities_close_date" ON "opportunities"("closeDate");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "opportunityAssignments" (
+  "opportunityId" UUID NOT NULL REFERENCES "opportunities"("opportunityId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("opportunityId", "userId")
+);
+
+-- ==========================================
+-- CRM BUSINESS DATA - CAMPAIGN MANAGEMENT
+-- ==========================================
+
+CREATE TABLE "campaignTypes" (
+  "campaignTypeId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "color" VARCHAR(7) NOT NULL DEFAULT '#3B82F6',
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_campaign_types_company_id" ON "campaignTypes"("companyId");
+CREATE INDEX "idx_campaign_types_status" ON "campaignTypes"("status");
+
+CREATE TABLE "campaigns" (
+  "campaignId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "startDate" DATE NOT NULL,
+  "endDate" DATE NOT NULL,
+  "budget" DECIMAL(10,2) NULL DEFAULT NULL,
+  "actualCost" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  "expectedResponse" INT NOT NULL DEFAULT 0,
+  "actualResponse" INT NOT NULL DEFAULT 0,
+  "campaignTypeId" UUID NOT NULL REFERENCES "campaignTypes"("campaignTypeId") ON DELETE RESTRICT,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_campaigns_company_id" ON "campaigns"("companyId");
+CREATE INDEX "idx_campaigns_status" ON "campaigns"("status");
+CREATE INDEX "idx_campaigns_start_date" ON "campaigns"("startDate");
+CREATE INDEX "idx_campaigns_end_date" ON "campaigns"("endDate");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "campaignAssignments" (
+  "campaignId" UUID NOT NULL REFERENCES "campaigns"("campaignId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("campaignId", "userId")
+);
+
+-- ==========================================
+-- CRM BUSINESS DATA - PROJECT MANAGEMENT
+-- ==========================================
+
+CREATE TABLE "taskStatuses" (
+  "taskStatusId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "color" VARCHAR(7) NOT NULL DEFAULT '#6B7280',
+  "description" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_task_statuses_company_id" ON "taskStatuses"("companyId");
+CREATE INDEX "idx_task_statuses_status" ON "taskStatuses"("status");
+
+CREATE TABLE "projects" (
+  "projectId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "accountId" UUID NOT NULL REFERENCES "accounts"("accountId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "code" VARCHAR(100) NULL DEFAULT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "startDate" DATE NULL DEFAULT NULL,
+  "endDate" DATE NULL DEFAULT NULL,
+  "budget" DECIMAL(15,2) NULL DEFAULT NULL,
+  "priority" VARCHAR(20) NOT NULL DEFAULT 'medium' CHECK ("priority" IN ('low', 'medium', 'high', 'urgent')),
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive', 'completed', 'on_hold')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "deletedAt" TIMESTAMPTZ NULL DEFAULT NULL
+);
+
+CREATE INDEX "idx_projects_company_id" ON "projects"("companyId");
+CREATE INDEX "idx_projects_account_id" ON "projects"("accountId");
+CREATE INDEX "idx_projects_status" ON "projects"("status");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "projectAssignments" (
+  "projectId" UUID NOT NULL REFERENCES "projects"("projectId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("projectId", "userId")
+);
+
+CREATE TABLE "projectTasks" (
+  "projectTaskId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "projectId" UUID NOT NULL REFERENCES "projects"("projectId") ON DELETE CASCADE,
+  "parentId" UUID NULL DEFAULT NULL REFERENCES "projectTasks"("projectTaskId") ON DELETE SET NULL,
+  "title" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "startDate" DATE NULL DEFAULT NULL,
+  "dueDate" DATE NULL DEFAULT NULL,
+  "priority" VARCHAR(20) NOT NULL DEFAULT 'medium' CHECK ("priority" IN ('low', 'medium', 'high', 'urgent')),
+  "taskStatusId" UUID NULL DEFAULT NULL REFERENCES "taskStatuses"("taskStatusId") ON DELETE SET NULL,
+  "estimatedHours" DECIMAL(8,2) NULL DEFAULT NULL,
+  "actualHours" DECIMAL(8,2) NULL DEFAULT NULL,
+  "progress" INT NOT NULL DEFAULT 0,
+  "attachments" JSONB NULL DEFAULT NULL,
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "deletedAt" TIMESTAMPTZ NULL DEFAULT NULL
+);
+
+CREATE INDEX "idx_project_tasks_company_id" ON "projectTasks"("companyId");
+CREATE INDEX "idx_project_tasks_project_id" ON "projectTasks"("projectId");
+CREATE INDEX "idx_project_tasks_parent_id" ON "projectTasks"("parentId");
+CREATE INDEX "idx_project_tasks_due_date" ON "projectTasks"("dueDate");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "taskAssignments" (
+  "projectTaskId" UUID NOT NULL REFERENCES "projectTasks"("projectTaskId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("projectTaskId", "userId")
+);
+
+-- ==========================================
+-- CRM BUSINESS DATA - CALENDAR
+-- ==========================================
+
+CREATE TABLE "meetings" (
+  "meetingId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "title" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "location" VARCHAR(255) NULL DEFAULT NULL,
+  "startDate" DATE NOT NULL,
+  "endDate" DATE NOT NULL,
+  "startTime" TIME NOT NULL,
+  "endTime" TIME NOT NULL,
+  "googleCalendarEventId" VARCHAR(255) NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'planned' CHECK ("status" IN ('planned', 'held', 'not_held')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_meetings_company_id" ON "meetings"("companyId");
+CREATE INDEX "idx_meetings_start_date" ON "meetings"("startDate");
+CREATE INDEX "idx_meetings_status" ON "meetings"("status");
+
+-- Meeting Attendees handles assignment implicitly
+
+CREATE TABLE "meetingAttendees" (
+  "meetingAttendeeId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "meetingId" UUID NOT NULL REFERENCES "meetings"("meetingId") ON DELETE CASCADE,
+  "attendeeType" VARCHAR(20) NOT NULL CHECK ("attendeeType" IN ('user', 'contact', 'lead')),
+  "attendeeId" UUID NOT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK ("status" IN ('pending', 'accepted', 'declined')),
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_meeting_attendees_meeting_id" ON "meetingAttendees"("meetingId");
+CREATE INDEX "idx_meeting_attendees_attendee" ON "meetingAttendees"("attendeeType", "attendeeId");
+
+CREATE TABLE "calls" (
+  "callId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "title" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "startDate" DATE NOT NULL,
+  "endDate" DATE NOT NULL,
+  "startTime" TIME NOT NULL,
+  "endTime" TIME NOT NULL,
+  "googleCalendarEventId" VARCHAR(255) NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'planned' CHECK ("status" IN ('planned', 'held', 'not_held')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_calls_company_id" ON "calls"("companyId");
+CREATE INDEX "idx_calls_start_date" ON "calls"("startDate");
+CREATE INDEX "idx_calls_status" ON "calls"("status");
+
+-- Call Attendees handles assignment implicitly
+
+CREATE TABLE "callAttendees" (
+  "callAttendeeId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "callId" UUID NOT NULL REFERENCES "calls"("callId") ON DELETE CASCADE,
+  "attendeeType" VARCHAR(20) NOT NULL CHECK ("attendeeType" IN ('user', 'contact', 'lead')),
+  "attendeeId" UUID NOT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK ("status" IN ('pending', 'accepted', 'declined')),
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_call_attendees_call_id" ON "callAttendees"("callId");
+CREATE INDEX "idx_call_attendees_attendee" ON "callAttendees"("attendeeType", "attendeeId");
+
+-- ==========================================
+-- CRM BUSINESS DATA - INVOICES & QUOTES
+-- ==========================================
+
+CREATE TABLE "quotes" (
+  "quoteId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "quoteNumber" VARCHAR(255) NOT NULL,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "opportunityId" UUID NULL DEFAULT NULL REFERENCES "opportunities"("opportunityId") ON DELETE SET NULL,
+  "accountId" UUID NULL DEFAULT NULL REFERENCES "accounts"("accountId") ON DELETE SET NULL,
+  "contactId" UUID NULL DEFAULT NULL REFERENCES "contacts"("contactId") ON DELETE SET NULL,
+  "quoteDate" DATE NOT NULL,
+  "validUntil" DATE NOT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK ("status" IN ('draft', 'sent', 'accepted', 'rejected', 'expired')),
+  "subtotal" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "taxAmount" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "discountAmount" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "totalAmount" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "billingAddress" TEXT NULL DEFAULT NULL,
+  "billingCity" VARCHAR(100) NULL DEFAULT NULL,
+  "billingState" VARCHAR(100) NULL DEFAULT NULL,
+  "billingPostalCode" VARCHAR(20) NULL DEFAULT NULL,
+  "billingCountry" VARCHAR(100) NULL DEFAULT NULL,
+  "notes" TEXT NULL DEFAULT NULL,
+  "terms" TEXT NULL DEFAULT NULL,
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE("companyId", "quoteNumber")
+);
+
+CREATE INDEX "idx_quotes_company_id" ON "quotes"("companyId");
+CREATE INDEX "idx_quotes_status" ON "quotes"("status");
+CREATE INDEX "idx_quotes_quote_date" ON "quotes"("quoteDate");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "quoteAssignments" (
+  "quoteId" UUID NOT NULL REFERENCES "quotes"("quoteId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("quoteId", "userId")
+);
+
+CREATE TABLE "salesOrders" (
+  "salesOrderId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "orderNumber" VARCHAR(255) NOT NULL,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "quoteId" UUID NULL DEFAULT NULL REFERENCES "quotes"("quoteId") ON DELETE SET NULL,
+  "opportunityId" UUID NULL DEFAULT NULL REFERENCES "opportunities"("opportunityId") ON DELETE SET NULL,
+  "accountId" UUID NULL DEFAULT NULL REFERENCES "accounts"("accountId") ON DELETE SET NULL,
+  "contactId" UUID NULL DEFAULT NULL REFERENCES "contacts"("contactId") ON DELETE SET NULL,
+  "orderDate" DATE NOT NULL,
+  "deliveryDate" DATE NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK ("status" IN ('draft', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled')),
+  "subtotal" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "taxAmount" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "discountAmount" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "totalAmount" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "billingAddress" TEXT NULL DEFAULT NULL,
+  "billingCity" VARCHAR(100) NULL DEFAULT NULL,
+  "billingState" VARCHAR(100) NULL DEFAULT NULL,
+  "billingPostalCode" VARCHAR(20) NULL DEFAULT NULL,
+  "billingCountry" VARCHAR(100) NULL DEFAULT NULL,
+  "shippingAddress" TEXT NULL DEFAULT NULL,
+  "shippingCity" VARCHAR(100) NULL DEFAULT NULL,
+  "shippingState" VARCHAR(100) NULL DEFAULT NULL,
+  "shippingPostalCode" VARCHAR(20) NULL DEFAULT NULL,
+  "shippingCountry" VARCHAR(100) NULL DEFAULT NULL,
+  "notes" TEXT NULL DEFAULT NULL,
+  "terms" TEXT NULL DEFAULT NULL,
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE("companyId", "orderNumber")
+);
+
+CREATE INDEX "idx_sales_orders_company_id" ON "salesOrders"("companyId");
+CREATE INDEX "idx_sales_orders_status" ON "salesOrders"("status");
+CREATE INDEX "idx_sales_orders_order_date" ON "salesOrders"("orderDate");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "salesOrderAssignments" (
+  "salesOrderId" UUID NOT NULL REFERENCES "salesOrders"("salesOrderId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("salesOrderId", "userId")
+);
+
+CREATE TABLE "invoices" (
+  "invoiceId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "invoiceNumber" VARCHAR(255) NOT NULL,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "salesOrderId" UUID NULL DEFAULT NULL REFERENCES "salesOrders"("salesOrderId") ON DELETE SET NULL,
+  "quoteId" UUID NULL DEFAULT NULL REFERENCES "quotes"("quoteId") ON DELETE SET NULL,
+  "opportunityId" UUID NULL DEFAULT NULL REFERENCES "opportunities"("opportunityId") ON DELETE SET NULL,
+  "accountId" UUID NULL DEFAULT NULL REFERENCES "accounts"("accountId") ON DELETE SET NULL,
+  "contactId" UUID NULL DEFAULT NULL REFERENCES "contacts"("contactId") ON DELETE SET NULL,
+  "invoiceDate" DATE NOT NULL,
+  "dueDate" DATE NOT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK ("status" IN ('draft', 'sent', 'paid', 'partially_paid', 'overdue', 'cancelled')),
+  "subtotal" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "taxAmount" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "discountAmount" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "totalAmount" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "paidAmount" DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+  "billingAddress" TEXT NULL DEFAULT NULL,
+  "billingCity" VARCHAR(100) NULL DEFAULT NULL,
+  "billingState" VARCHAR(100) NULL DEFAULT NULL,
+  "billingPostalCode" VARCHAR(20) NULL DEFAULT NULL,
+  "billingCountry" VARCHAR(100) NULL DEFAULT NULL,
+  "notes" TEXT NULL DEFAULT NULL,
+  "terms" TEXT NULL DEFAULT NULL,
+  "paymentMethod" VARCHAR(50) NULL DEFAULT NULL,
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE("companyId", "invoiceNumber")
+);
+
+CREATE INDEX "idx_invoices_company_id" ON "invoices"("companyId");
+CREATE INDEX "idx_invoices_status" ON "invoices"("status");
+CREATE INDEX "idx_invoices_invoice_date" ON "invoices"("invoiceDate");
+CREATE INDEX "idx_invoices_due_date" ON "invoices"("dueDate");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "invoiceAssignments" (
+  "invoiceId" UUID NOT NULL REFERENCES "invoices"("invoiceId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("invoiceId", "userId")
+);
+
+CREATE TABLE "invoicePayments" (
+  "invoicePaymentId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "invoiceId" UUID NOT NULL REFERENCES "invoices"("invoiceId") ON DELETE CASCADE,
+  "amount" DECIMAL(15,2) NOT NULL,
+  "paymentDate" DATE NOT NULL,
+  "paymentMethod" VARCHAR(50) NOT NULL,
+  "referenceNumber" VARCHAR(255) NULL DEFAULT NULL,
+  "notes" TEXT NULL DEFAULT NULL,
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_invoice_payments_invoice_id" ON "invoicePayments"("invoiceId");
+CREATE INDEX "idx_invoice_payments_payment_date" ON "invoicePayments"("paymentDate");
+
+-- ==========================================
+-- CRM BUSINESS DATA - DOCUMENT MANAGEMENT
+-- ==========================================
+
+CREATE TABLE "documentTypes" (
+  "documentTypeId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "typeName" VARCHAR(255) NOT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_document_types_company_id" ON "documentTypes"("companyId");
+CREATE INDEX "idx_document_types_status" ON "documentTypes"("status");
+
+CREATE TABLE "documentFolders" (
+  "documentFolderId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "parentFolderId" UUID NULL DEFAULT NULL REFERENCES "documentFolders"("documentFolderId") ON DELETE CASCADE,
+  "description" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_document_folders_company_id" ON "documentFolders"("companyId");
+CREATE INDEX "idx_document_folders_parent_folder_id" ON "documentFolders"("parentFolderId");
+CREATE INDEX "idx_document_folders_status" ON "documentFolders"("status");
+
+CREATE TABLE "documents" (
+  "documentId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "accountId" UUID NULL DEFAULT NULL REFERENCES "accounts"("accountId") ON DELETE SET NULL,
+  "folderId" UUID NULL DEFAULT NULL REFERENCES "documentFolders"("documentFolderId") ON DELETE SET NULL,
+  "typeId" UUID NULL DEFAULT NULL REFERENCES "documentTypes"("documentTypeId") ON DELETE SET NULL,
+  "opportunityId" UUID NULL DEFAULT NULL REFERENCES "opportunities"("opportunityId") ON DELETE SET NULL,
+  "publishDate" DATE NULL DEFAULT NULL,
+  "expirationDate" DATE NULL DEFAULT NULL,
+  "attachment" VARCHAR(255) NULL DEFAULT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_documents_company_id" ON "documents"("companyId");
+CREATE INDEX "idx_documents_account_id" ON "documents"("accountId");
+CREATE INDEX "idx_documents_folder_id" ON "documents"("folderId");
+CREATE INDEX "idx_documents_status" ON "documents"("status");
+
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "documentAssignments" (
+  "documentId" UUID NOT NULL REFERENCES "documents"("documentId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("documentId", "userId")
+);
+
+-- ==========================================
+-- CRM BUSINESS DATA - MEDIA
+-- ==========================================
+
+CREATE TABLE "media" (
+  "mediaId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "modelType" VARCHAR(255) NOT NULL,
+  "modelId" UUID NOT NULL,
+  "uuid" UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+  "collectionName" VARCHAR(255) NOT NULL,
+  "name" VARCHAR(255) NOT NULL,
+  "fileName" VARCHAR(255) NOT NULL,
+  "mimeType" VARCHAR(255) NULL DEFAULT NULL,
+  "disk" VARCHAR(255) NOT NULL,
+  "conversionsDisk" VARCHAR(255) NULL DEFAULT NULL,
+  "size" BIGINT NOT NULL,
+  "manipulations" JSONB NOT NULL DEFAULT '{}',
+  "customProperties" JSONB NOT NULL DEFAULT '{}',
+  "generatedConversions" JSONB NOT NULL DEFAULT '{}',
+  "responsiveImages" JSONB NOT NULL DEFAULT '{}',
+  "orderColumn" INT NULL DEFAULT NULL,
+  "userId" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_media_company_id" ON "media"("companyId");
+CREATE INDEX "idx_media_model" ON "media"("modelType", "modelId");
+CREATE INDEX "idx_media_collection_name" ON "media"("collectionName");
+
+-- ==========================================
+-- PLATFORM - REFERRALS
+-- ==========================================
+
+CREATE TABLE "referralSettings" (
+  "referralSettingId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "isEnabled" BOOLEAN NOT NULL DEFAULT TRUE,
+  "commissionPercentage" DECIMAL(5,2) NOT NULL DEFAULT 10.00,
+  "thresholdAmount" DECIMAL(10,2) NOT NULL DEFAULT 50.00,
+  "guidelines" TEXT NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE "referrals" (
+  "referralId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "referrerCompanyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "referredCompanyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "planId" UUID NULL DEFAULT NULL REFERENCES "plans"("planId") ON DELETE SET NULL,
+  "commissionPercentage" DECIMAL(5,2) NOT NULL,
+  "amount" DECIMAL(10,2) NOT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_referrals_referrer_company_id" ON "referrals"("referrerCompanyId");
+CREATE INDEX "idx_referrals_referred_company_id" ON "referrals"("referredCompanyId");
+
+CREATE TABLE "payoutRequests" (
+  "payoutRequestId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "amount" DECIMAL(10,2) NOT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK ("status" IN ('pending', 'approved', 'rejected')),
+  "notes" TEXT NULL DEFAULT NULL,
+  "processedBy" UUID NULL DEFAULT NULL REFERENCES "superadmins"("superadminId") ON DELETE SET NULL,
+  "processedAt" TIMESTAMPTZ NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_payout_requests_company_id" ON "payoutRequests"("companyId");
+CREATE INDEX "idx_payout_requests_status" ON "payoutRequests"("status");
+
+-- ==========================================
+-- PLATFORM - NOTIFICATIONS & TEMPLATES
+-- ==========================================
+
+CREATE TABLE "notificationTemplates" (
+  "notificationTemplateId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "name" VARCHAR(255) NOT NULL,
+  "type" VARCHAR(50) NOT NULL DEFAULT 'twilio',
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE "emailTemplates" (
+  "emailTemplateId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "name" VARCHAR(255) NOT NULL,
+  "fromAddress" VARCHAR(255) NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE "companyEmailTemplates" (
+  "companyEmailTemplateId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "templateId" UUID NOT NULL REFERENCES "emailTemplates"("emailTemplateId") ON DELETE CASCADE,
+  "isActive" BOOLEAN NOT NULL DEFAULT FALSE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE("companyId", "templateId")
+);
+
+CREATE INDEX "idx_company_email_templates_company_id" ON "companyEmailTemplates"("companyId");
+
+CREATE TABLE "companyNotificationTemplates" (
+  "companyNotificationTemplateId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "templateId" UUID NOT NULL REFERENCES "notificationTemplates"("notificationTemplateId") ON DELETE CASCADE,
+  "isActive" BOOLEAN NOT NULL DEFAULT FALSE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE("companyId", "templateId")
+);
+
+CREATE INDEX "idx_company_notification_templates_company_id" ON "companyNotificationTemplates"("companyId");
+
+-- ==========================================
+-- AUDIT & TRACKING
+-- ==========================================
+
+CREATE TABLE "loginHistories" (
+  "loginHistoryId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NULL DEFAULT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "userId" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "superadminId" UUID NULL DEFAULT NULL REFERENCES "superadmins"("superadminId") ON DELETE CASCADE,
+  "ip" VARCHAR(45) NOT NULL,
+  "userAgent" TEXT NULL DEFAULT NULL,
+  "loginAt" TIMESTAMPTZ NOT NULL,
+  "logoutAt" TIMESTAMPTZ NULL DEFAULT NULL,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_login_histories_company_id" ON "loginHistories"("companyId");
+CREATE INDEX "idx_login_histories_user_id" ON "loginHistories"("userId");
+CREATE INDEX "idx_login_histories_superadmin_id" ON "loginHistories"("superadminId");
+CREATE INDEX "idx_login_histories_login_at" ON "loginHistories"("loginAt");
+
