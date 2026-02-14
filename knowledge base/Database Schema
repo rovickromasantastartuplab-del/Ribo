@@ -421,8 +421,25 @@ CREATE INDEX "idx_lead_comments_lead_id" ON "leadComments"("leadId");
 CREATE INDEX "idx_lead_comments_created_by" ON "leadComments"("createdBy");
 
 -- ==========================================
--- CRM BUSINESS DATA - ACCOUNT MANAGEMENT
+-- CRM BUSINESS DATA - ACCOUNT MANAGEMENT (UPDATED)
 -- ==========================================
+
+-- ACCOUNT ACTIVITIES LOGGING
+CREATE TABLE "accountActivities" (
+  "accountActivityId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "accountId" UUID NOT NULL REFERENCES "accounts"("accountId") ON DELETE CASCADE,
+  "userId" UUID NULL REFERENCES "users"("userId") ON DELETE SET NULL, 
+  "activityType" VARCHAR(50) NOT NULL, 
+  "title" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL,
+  "metadata" JSONB NULL DEFAULT '{}', 
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_account_activities_account_id" ON "accountActivities"("accountId");
+CREATE INDEX "idx_account_activities_user_id" ON "accountActivities"("userId");
+CREATE INDEX "idx_account_activities_type" ON "accountActivities"("activityType");
+CREATE INDEX "idx_account_activities_created_at" ON "accountActivities"("createdAt");
 
 CREATE TABLE "accountTypes" (
   "accountTypeId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -520,6 +537,24 @@ CREATE TABLE "contactAssignments" (
   PRIMARY KEY ("contactId", "userId")
 );
 
+
+CREATE TABLE IF NOT EXISTS "contactActivities" (
+  "contactActivityId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "contactId" UUID NOT NULL REFERENCES "contacts"("contactId") ON DELETE CASCADE,
+  "userId" UUID NULL REFERENCES "users"("userId") ON DELETE SET NULL, 
+  "activityType" VARCHAR(50) NOT NULL, 
+  "title" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL,
+  "metadata" JSONB NULL DEFAULT '{}', 
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS "idx_contact_activities_contact_id" ON "contactActivities"("contactId");
+CREATE INDEX IF NOT EXISTS "idx_contact_activities_user_id" ON "contactActivities"("userId");
+CREATE INDEX IF NOT EXISTS "idx_contact_activities_type" ON "contactActivities"("activityType");
+CREATE INDEX IF NOT EXISTS "idx_contact_activities_created_at" ON "contactActivities"("createdAt");
+
+
 -- ==========================================
 -- CRM BUSINESS DATA - OPPORTUNITY MANAGEMENT
 -- ==========================================
@@ -585,6 +620,24 @@ CREATE TABLE "opportunityAssignments" (
   "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
   PRIMARY KEY ("opportunityId", "userId")
 );
+
+
+CREATE TABLE IF NOT EXISTS "opportunityActivities" (
+  "opportunityActivityId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "opportunityId" UUID NOT NULL REFERENCES "opportunities"("opportunityId") ON DELETE CASCADE,
+  "userId" UUID NULL REFERENCES "users"("userId") ON DELETE SET NULL, 
+  "activityType" VARCHAR(50) NOT NULL, 
+  "title" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL,
+  "metadata" JSONB NULL DEFAULT '{}', 
+  "createdAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS "idx_opportunity_activities_opportunity_id" ON "opportunityActivities"("opportunityId");
+CREATE INDEX IF NOT EXISTS "idx_opportunity_activities_user_id" ON "opportunityActivities"("userId");
+CREATE INDEX IF NOT EXISTS "idx_opportunity_activities_type" ON "opportunityActivities"("activityType");
+CREATE INDEX IF NOT EXISTS "idx_opportunity_activities_created_at" ON "opportunityActivities"("createdAt");
+
 
 -- ==========================================
 -- CRM BUSINESS DATA - CAMPAIGN MANAGEMENT

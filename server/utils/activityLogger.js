@@ -35,3 +35,99 @@ export const logLeadActivity = async (leadId, activityType, title, description, 
         console.error('Unexpected error logging lead activity:', err);
     }
 };
+
+/**
+ * Logs an activity for an account.
+ * 
+ * @param {string} accountId - The UUID of the account.
+ * @param {string} userId - The UUID of the user performing the action.
+ * @param {string} activityType - Type of activity (e.g., 'created', 'updated').
+ * @param {string} title - Brief title.
+ * @param {string} description - Detailed description.
+ * @param {object} metadata - Details (optional).
+ */
+export const logAccountActivity = async (accountId, userId, activityType, title, description, metadata = {}) => {
+    try {
+        const { error } = await supabase
+            .from('accountActivities')
+            .insert([{
+                accountId,
+                userId,
+                activityType,
+                title,
+                description,
+                metadata,
+                createdAt: new Date()
+            }]);
+
+        if (error) {
+            console.error('Error logging account activity:', error);
+        }
+    } catch (err) {
+        console.error('Unexpected error logging account activity:', err);
+    }
+};
+
+/**
+ * Logs an activity for a contact.
+ * 
+ * @param {string} contactId - The UUID of the contact.
+ * @param {string} userId - The UUID of the user performing the action.
+ * @param {string} activityType - Type of activity (e.g., 'created', 'updated').
+ * @param {string} title - Brief title.
+ * @param {string} description - Detailed description.
+ * @param {object} metadata - Details (optional).
+ */
+export const logContactActivity = async (contactId, userId, activityType, title, description, metadata = {}) => {
+    try {
+        const { error } = await supabase
+            .from('contactActivities')
+            .insert([{
+                contactId,
+                userId,
+                activityType,
+                title,
+                description,
+                metadata,
+                createdAt: new Date()
+            }]);
+
+        if (error) {
+            console.error('Error logging contact activity:', error);
+        }
+    } catch (err) {
+        console.error('Unexpected error logging contact activity:', err);
+    }
+};
+
+/**
+ * Logs an activity for an opportunity.
+ * 
+ * @param {string} opportunityId - The UUID of the opportunity.
+ * @param {string} userId - The UUID of the user performing the action.
+ * @param {string} activityType - Type of activity (e.g., 'created', 'updated', 'stage_changed').
+ * @param {string} title - Brief title.
+ * @param {string} description - Detailed description.
+ * @param {object} metadata - Details (optional).
+ */
+export const logOpportunityActivity = async (opportunityId, userId, activityType, title, description, metadata = {}) => {
+    try {
+        const { error } = await supabase
+            .from('opportunityActivities')
+            .insert([{
+                opportunityId,
+                userId,
+                activityType,
+                title,
+                description,
+                metadata,
+                createdAt: new Date()
+            }]);
+
+        if (error) {
+            console.error('Error logging opportunity activity:', error);
+        }
+    } catch (err) {
+        console.error('Unexpected error logging opportunity activity:', err);
+    }
+};
