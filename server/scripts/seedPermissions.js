@@ -17,71 +17,73 @@ const supabase = createClient(
 // Define Permissions (Based on Reference Project & Schema)
 const modules = {
     // 1. Dashboard
-    'dashboard': ['view'],
+    'dashboard': ['view', 'manage'],
 
     // 2. Staff Management
-    'user': ['view', 'create', 'edit', 'delete'],
-    'role': ['view', 'create', 'edit', 'delete'],
+    'user': ['view', 'create', 'edit', 'delete', 'manage'],
+    'role': ['view', 'create', 'edit', 'delete', 'manage'],
 
     // 3. Lead Management
-    'lead': ['view', 'create', 'edit', 'delete', 'convert', 'import', 'export'],
-    'leadStatus': ['view', 'create', 'edit', 'delete'],
-    'leadSource': ['view', 'create', 'edit', 'delete'],
+    'lead': ['view', 'create', 'edit', 'delete', 'convert', 'import', 'export', 'manage'],
+    'leadStatus': ['view', 'create', 'edit', 'delete', 'manage'],
+    'leadSource': ['view', 'create', 'edit', 'delete', 'manage'],
 
     // 4. Opportunity Management
-    'opportunity': ['view', 'create', 'edit', 'delete'],
-    'opportunityStage': ['view', 'create', 'edit', 'delete'],
-    'opportunitySource': ['view', 'create', 'edit', 'delete'],
+    'opportunity': ['view', 'create', 'edit', 'delete', 'manage'],
+    'opportunityStage': ['view', 'create', 'edit', 'delete', 'manage'],
+    'opportunitySource': ['view', 'create', 'edit', 'delete', 'manage'],
 
     // 5. Account Management
-    'account': ['view', 'create', 'edit', 'delete', 'import', 'export'],
-    'accountType': ['view', 'create', 'edit', 'delete'],
-    'accountIndustry': ['view', 'create', 'edit', 'delete'],
+    'account': ['view', 'create', 'edit', 'delete', 'import', 'export', 'manage'],
+    'accountType': ['view', 'create', 'edit', 'delete', 'manage'],
+    'accountIndustry': ['view', 'create', 'edit', 'delete', 'manage'],
 
     // 6. Contact Management
-    'contact': ['view', 'create', 'edit', 'delete', 'import', 'export'],
+    'contact': ['view', 'create', 'edit', 'delete', 'import', 'export', 'manage'],
 
     // 7. Invoice Management
-    'invoice': ['view', 'create', 'edit', 'delete', 'send', 'download'],
-    'tax': ['view', 'create', 'edit', 'delete'],
-    'currency': ['view', 'create', 'edit', 'delete'],
+    'invoice': ['view', 'create', 'edit', 'delete', 'send', 'download', 'manage'],
+    'tax': ['view', 'create', 'edit', 'delete', 'manage'],
+    'currency': ['view', 'create', 'edit', 'delete', 'manage'],
 
     // 8. Document Management
-    'document': ['view', 'create', 'edit', 'delete', 'download'],
-    'documentFolder': ['view', 'create', 'edit', 'delete'],
+    'document': ['view', 'create', 'edit', 'delete', 'download', 'manage'],
+    'documentFolder': ['view', 'create', 'edit', 'delete', 'manage'],
 
     // 9. Campaign Management
-    'campaign': ['view', 'create', 'edit', 'delete'],
-    'campaignType': ['view', 'create', 'edit', 'delete'],
+    'campaign': ['view', 'create', 'edit', 'delete', 'manage'],
+    'campaignType': ['view', 'create', 'edit', 'delete', 'manage'],
+    'targetList': ['view', 'create', 'edit', 'delete', 'manage'], // Added TargetList as it was in reference
 
     // 10. Calendar & Activity
     'calendar': ['view', 'manage'],
-    'meeting': ['view', 'create', 'edit', 'delete'],
-    'call': ['view', 'create', 'edit', 'delete', 'log'],
-    'task': ['view', 'create', 'edit', 'delete'],
+    'meeting': ['view', 'create', 'edit', 'delete', 'manage'],
+    'call': ['view', 'create', 'edit', 'delete', 'log', 'manage'],
+    'task': ['view', 'create', 'edit', 'delete', 'manage'],
 
     // 11. Reports
-    'report': ['view', 'export'],
+    'report': ['view', 'export', 'manage'],
 
     // 12. Plans & Subscriptions
-    'plan': ['view', 'create', 'edit', 'delete'],
-    'planRequest': ['view', 'create', 'edit', 'delete', 'approve', 'reject'],
-    'planOrder': ['view', 'create', 'edit', 'delete', 'approve', 'reject'],
-    'coupon': ['view', 'create', 'edit', 'delete'],
+    'plan': ['view', 'create', 'edit', 'delete', 'manage'],
+    'planRequest': ['view', 'create', 'edit', 'delete', 'approve', 'reject', 'manage'],
+    'planOrder': ['view', 'create', 'edit', 'delete', 'approve', 'reject', 'manage'],
+    'coupon': ['view', 'create', 'edit', 'delete', 'manage'],
 
     // 13. Media Library
-    'media': ['view', 'create', 'edit', 'delete', 'upload'],
+    'media': ['view', 'create', 'edit', 'delete', 'upload', 'manage'],
 
     // 14. Referral Program
-    'referral': ['view', 'create', 'edit', 'delete', 'approve', 'reject'],
+    'referral': ['view', 'create', 'edit', 'delete', 'approve', 'reject', 'manage'],
 
     // 15. Notification Templates
-    'notificationTemplate': ['view', 'create', 'edit', 'delete', 'send'],
+    'notificationTemplate': ['view', 'create', 'edit', 'delete', 'send', 'manage'],
+    'template': ['view', 'create', 'edit', 'delete', 'send', 'manage'],
 
     // 16. Settings
-    'setting': ['view', 'edit'],
-    'company': ['view', 'create', 'edit', 'delete', 'suspend'], // Super Admin feature
-    'landingPage': ['view', 'edit'], // Super Admin feature
+    'setting': ['view', 'edit', 'manage'],
+    'company': ['view', 'create', 'edit', 'delete', 'suspend', 'manage'], // Super Admin feature
+    'landingPage': ['view', 'edit', 'manage'], // Super Admin feature
 };
 
 const seed = async () => {

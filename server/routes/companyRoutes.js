@@ -7,4 +7,10 @@ const router = express.Router();
 // User must be logged in to create a company
 router.post('/', companyController.create);
 
+// Get Current User's Company
+router.get('/my-company', companyController.getMyCompany);
+
+// Update Company Settings
+router.put('/my-company', companyController.updateCompany);
+
 export default router;

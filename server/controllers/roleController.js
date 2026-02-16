@@ -183,7 +183,7 @@ export const updateRolePermissions = async (req, res, next) => {
         // 1. Verify Role Ownership (Security Check)
         const { data: role, error: roleError } = await supabase
             .from('roles')
-            .select('companyId, type')
+            .select('companyId')
             .eq('roleId', id)
             .single();
 

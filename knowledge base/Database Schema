@@ -14,19 +14,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- PLATFORM LAYER
 -- ==========================================
 
-CREATE TABLE "superadmins" (
-  "superadminId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  "authUserId" UUID NOT NULL UNIQUE REFERENCES auth.users("id") ON DELETE CASCADE,
-  "name" VARCHAR(255) NOT NULL,
-  "avatar" VARCHAR(255) NULL DEFAULT NULL,
-  "lang" VARCHAR(10) NOT NULL DEFAULT 'en',
-  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
-  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
-  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
-);
 
-CREATE INDEX "idx_superadmins_auth_user_id" ON "superadmins"("authUserId");
-CREATE INDEX "idx_superadmins_status" ON "superadmins"("status");
 
 CREATE TABLE "plans" (
   "planId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -83,6 +71,7 @@ CREATE TABLE "companies" (
   "lang" VARCHAR(10) NOT NULL DEFAULT 'en',
   "mode" VARCHAR(20) NOT NULL DEFAULT 'light',
   "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive', 'suspended')),
+  "isOnboarded" BOOLEAN NOT NULL DEFAULT FALSE,
   "createdAt" TIMESTAMPTZ DEFAULT NOW(),
   "updatedAt" TIMESTAMPTZ DEFAULT NOW()
 );
@@ -129,7 +118,7 @@ CREATE TABLE "planOrders" (
   "status" VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK ("status" IN ('pending', 'approved', 'rejected', 'cancelled')),
   "orderedAt" TIMESTAMPTZ NOT NULL,
   "processedAt" TIMESTAMPTZ NULL DEFAULT NULL,
-  "processedBy" UUID NULL DEFAULT NULL REFERENCES "superadmins"("superadminId") ON DELETE SET NULL,
+  "processedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
   "notes" TEXT NULL DEFAULT NULL,
   "createdAt" TIMESTAMPTZ DEFAULT NOW(),
   "updatedAt" TIMESTAMPTZ DEFAULT NOW()
@@ -148,7 +137,7 @@ CREATE TABLE "planRequests" (
   "status" VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK ("status" IN ('pending', 'approved', 'rejected')),
   "requestedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "processedAt" TIMESTAMPTZ NULL DEFAULT NULL,
-  "processedBy" UUID NULL DEFAULT NULL REFERENCES "superadmins"("superadminId") ON DELETE SET NULL,
+  "processedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
   "notes" TEXT NULL DEFAULT NULL,
   "createdAt" TIMESTAMPTZ DEFAULT NOW(),
   "updatedAt" TIMESTAMPTZ DEFAULT NOW()
@@ -171,7 +160,7 @@ CREATE TABLE "coupons" (
   "expiryDate" DATE NULL DEFAULT NULL,
   "codeType" VARCHAR(20) NOT NULL DEFAULT 'manual' CHECK ("codeType" IN ('manual', 'auto')),
   "status" BOOLEAN NOT NULL DEFAULT TRUE,
-  "createdBy" UUID NOT NULL REFERENCES "superadmins"("superadminId") ON DELETE CASCADE,
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
   "createdAt" TIMESTAMPTZ DEFAULT NOW(),
   "updatedAt" TIMESTAMPTZ DEFAULT NOW()
 );
@@ -206,15 +195,17 @@ create table public.users (
   "google2faSecret" text null,
   status character varying(20) not null default 'active'::character varying,
   "isEnableLogin" boolean not null default true,
+ 
   "createdBy" uuid null,
   "createdAt" timestamp with time zone null default now(),
   "updatedAt" timestamp with time zone null default now(),
   email character varying(255) null,
+  type character varying(20) null default 'user'::character varying,
   constraint users_pkey primary key ("userId"),
   constraint users_authUserId_key unique ("authUserId"),
-  constraint users_authUserId_fkey foreign KEY ("authUserId") references auth.users (id) on delete CASCADE,
   constraint users_companyId_fkey foreign KEY ("companyId") references companies ("companyId") on delete CASCADE,
   constraint users_createdBy_fkey foreign KEY ("createdBy") references users ("userId") on delete set null,
+  constraint users_authuserid_fkey foreign KEY ("authUserId") references auth.users (id) on delete CASCADE deferrable initially DEFERRED,
   constraint users_status_check check (
     (
       (status)::text = any (
@@ -222,6 +213,19 @@ create table public.users (
           array[
             'active'::character varying,
             'inactive'::character varying
+          ]
+        )::text[]
+      )
+    )
+  ),
+  constraint users_type_check check (
+    (
+      (type)::text = any (
+        (
+          array[
+            'superadmin'::character varying,
+            'company'::character varying,
+            'user'::character varying
           ]
         )::text[]
       )
@@ -237,26 +241,8 @@ create index IF not exists idx_users_status on public.users using btree (status)
 
 create index IF not exists idx_users_created_by on public.users using btree ("createdBy") TABLESPACE pg_default;
 
-create index IF not exists idx_users_auth_user_id on public.users using btree ("authUserId") TABLESPACE pg_default;
+create index IF not exists idx_users_type on public.users using btree (type) TABLESPACE pg_default;
 
-create index IF not exists idx_users_company_id on public.users using btree ("companyId") TABLESPACE pg_default;
-
-create index IF not exists idx_users_status on public.users using btree (status) TABLESPACE pg_default;
-
-create index IF not exists idx_users_created_by on public.users using btree ("createdBy") TABLESPACE pg_default;
-
-create index IF not exists idx_users_auth_user_id on public.users using btree ("authUserId") TABLESPACE pg_default;
-
-create index IF not exists idx_users_company_id on public.users using btree ("companyId") TABLESPACE pg_default;
-
-create index IF not exists idx_users_status on public.users using btree (status) TABLESPACE pg_default;
-
-create index IF not exists idx_users_created_by on public.users using btree ("createdBy") TABLESPACE pg_default;
-
-CREATE INDEX "idx_users_auth_user_id" ON "users"("authUserId");
-CREATE INDEX "idx_users_company_id" ON "users"("companyId");
-CREATE INDEX "idx_users_status" ON "users"("status");
-CREATE INDEX "idx_users_created_by" ON "users"("createdBy");
 
 CREATE TABLE "roles" (
   "roleId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -690,6 +676,25 @@ CREATE TABLE "campaignAssignments" (
   PRIMARY KEY ("campaignId", "userId")
 );
 
+
+
+-- Add this to your Database Schema after campaignTypes table
+
+CREATE TABLE "targetLists" (
+  "targetListId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "name" VARCHAR(255) NOT NULL,
+  "description" TEXT NULL DEFAULT NULL,
+  "status" VARCHAR(20) NOT NULL DEFAULT 'active' CHECK ("status" IN ('active', 'inactive')),
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_target_lists_company_id" ON "targetLists"("companyId");
+CREATE INDEX "idx_target_lists_status" ON "targetLists"("status");
+
+
 -- ==========================================
 -- CRM BUSINESS DATA - PROJECT MANAGEMENT
 -- ==========================================
@@ -789,6 +794,8 @@ CREATE TABLE "meetings" (
   "endDate" DATE NOT NULL,
   "startTime" TIME NOT NULL,
   "endTime" TIME NOT NULL,
+  "parentModule" VARCHAR(20) NULL DEFAULT NULL CHECK ("parentModule" IN ('lead', 'account', 'contact', 'opportunity')),
+  "parentId" UUID NULL DEFAULT NULL,
   "googleCalendarEventId" VARCHAR(255) NULL DEFAULT NULL,
   "status" VARCHAR(20) NOT NULL DEFAULT 'planned' CHECK ("status" IN ('planned', 'held', 'not_held')),
   "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
@@ -799,8 +806,21 @@ CREATE TABLE "meetings" (
 CREATE INDEX "idx_meetings_company_id" ON "meetings"("companyId");
 CREATE INDEX "idx_meetings_start_date" ON "meetings"("startDate");
 CREATE INDEX "idx_meetings_status" ON "meetings"("status");
+CREATE INDEX "idx_meetings_parent" ON "meetings"("parentModule", "parentId");
 
--- Meeting Attendees handles assignment implicitly
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "meetingAssignments" (
+  "meetingId" UUID NOT NULL REFERENCES "meetings"("meetingId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("meetingId", "userId")
+);
+
+CREATE INDEX "idx_meeting_assignments_meeting_id" ON "meetingAssignments"("meetingId");
+CREATE INDEX "idx_meeting_assignments_user_id" ON "meetingAssignments"("userId");
+
+-- Meeting Attendees handles attendee tracking
 
 CREATE TABLE "meetingAttendees" (
   "meetingAttendeeId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -824,6 +844,8 @@ CREATE TABLE "calls" (
   "endDate" DATE NOT NULL,
   "startTime" TIME NOT NULL,
   "endTime" TIME NOT NULL,
+  "parentModule" VARCHAR(20) NULL DEFAULT NULL CHECK ("parentModule" IN ('lead', 'account', 'contact', 'opportunity')),
+  "parentId" UUID NULL DEFAULT NULL,
   "googleCalendarEventId" VARCHAR(255) NULL DEFAULT NULL,
   "status" VARCHAR(20) NOT NULL DEFAULT 'planned' CHECK ("status" IN ('planned', 'held', 'not_held')),
   "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
@@ -834,8 +856,21 @@ CREATE TABLE "calls" (
 CREATE INDEX "idx_calls_company_id" ON "calls"("companyId");
 CREATE INDEX "idx_calls_start_date" ON "calls"("startDate");
 CREATE INDEX "idx_calls_status" ON "calls"("status");
+CREATE INDEX "idx_calls_parent" ON "calls"("parentModule", "parentId");
 
--- Call Attendees handles assignment implicitly
+-- PIVOT TABLE FOR MULTI-ASSIGNMENT
+CREATE TABLE "callAssignments" (
+  "callId" UUID NOT NULL REFERENCES "calls"("callId") ON DELETE CASCADE,
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "assignedAt" TIMESTAMPTZ DEFAULT NOW(),
+  "assignedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
+  PRIMARY KEY ("callId", "userId")
+);
+
+CREATE INDEX "idx_call_assignments_call_id" ON "callAssignments"("callId");
+CREATE INDEX "idx_call_assignments_user_id" ON "callAssignments"("userId");
+
+-- Call Attendees handles attendee tracking
 
 CREATE TABLE "callAttendees" (
   "callAttendeeId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -849,6 +884,57 @@ CREATE TABLE "callAttendees" (
 
 CREATE INDEX "idx_call_attendees_call_id" ON "callAttendees"("callId");
 CREATE INDEX "idx_call_attendees_attendee" ON "callAttendees"("attendeeType", "attendeeId");
+
+
+-- ==========================================
+-- NOTIFICATION TEMPLATES
+-- ==========================================
+
+-- Base notification templates (global, shared across companies)
+CREATE TABLE "notificationTemplates" (
+  "notificationTemplateId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "name" VARCHAR(255) NOT NULL,
+  "type" VARCHAR(50) NOT NULL DEFAULT 'email',
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX "idx_notification_templates_type" ON "notificationTemplates"("type");
+CREATE INDEX "idx_notification_templates_name" ON "notificationTemplates"("name");
+
+-- Multi-language content per company
+CREATE TABLE "notificationTemplateLangs" (
+  "langId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "templateId" UUID NOT NULL REFERENCES "notificationTemplates"("notificationTemplateId") ON DELETE CASCADE,
+  "lang" VARCHAR(10) NOT NULL DEFAULT 'en',
+  "title" VARCHAR(500) NOT NULL,
+  "content" TEXT NOT NULL,
+  "companyId" UUID NOT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
+  "createdBy" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE ("templateId", "lang", "companyId")
+);
+
+CREATE INDEX "idx_notification_template_langs_template_id" ON "notificationTemplateLangs"("templateId");
+CREATE INDEX "idx_notification_template_langs_company_id" ON "notificationTemplateLangs"("companyId");
+CREATE INDEX "idx_notification_template_langs_lang" ON "notificationTemplateLangs"("lang");
+
+-- User notification preferences
+CREATE TABLE "userNotificationTemplates" (
+  "userTemplateId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "userId" UUID NOT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
+  "templateId" UUID NOT NULL REFERENCES "notificationTemplates"("notificationTemplateId") ON DELETE CASCADE,
+  "isActive" BOOLEAN NOT NULL DEFAULT true,
+  "createdAt" TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE ("userId", "templateId")
+);
+
+CREATE INDEX "idx_user_notification_templates_user_id" ON "userNotificationTemplates"("userId");
+CREATE INDEX "idx_user_notification_templates_template_id" ON "userNotificationTemplates"("templateId");
+CREATE INDEX "idx_user_notification_templates_active" ON "userNotificationTemplates"("isActive");
+
 
 -- ==========================================
 -- CRM BUSINESS DATA - INVOICES & QUOTES
@@ -1137,7 +1223,7 @@ CREATE TABLE "payoutRequests" (
   "amount" DECIMAL(10,2) NOT NULL,
   "status" VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK ("status" IN ('pending', 'approved', 'rejected')),
   "notes" TEXT NULL DEFAULT NULL,
-  "processedBy" UUID NULL DEFAULT NULL REFERENCES "superadmins"("superadminId") ON DELETE SET NULL,
+  "processedBy" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE SET NULL,
   "processedAt" TIMESTAMPTZ NULL DEFAULT NULL,
   "createdAt" TIMESTAMPTZ DEFAULT NOW(),
   "updatedAt" TIMESTAMPTZ DEFAULT NOW()
@@ -1198,7 +1284,6 @@ CREATE TABLE "loginHistories" (
   "loginHistoryId" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   "companyId" UUID NULL DEFAULT NULL REFERENCES "companies"("companyId") ON DELETE CASCADE,
   "userId" UUID NULL DEFAULT NULL REFERENCES "users"("userId") ON DELETE CASCADE,
-  "superadminId" UUID NULL DEFAULT NULL REFERENCES "superadmins"("superadminId") ON DELETE CASCADE,
   "ip" VARCHAR(45) NOT NULL,
   "userAgent" TEXT NULL DEFAULT NULL,
   "loginAt" TIMESTAMPTZ NOT NULL,
@@ -1209,6 +1294,5 @@ CREATE TABLE "loginHistories" (
 
 CREATE INDEX "idx_login_histories_company_id" ON "loginHistories"("companyId");
 CREATE INDEX "idx_login_histories_user_id" ON "loginHistories"("userId");
-CREATE INDEX "idx_login_histories_superadmin_id" ON "loginHistories"("superadminId");
 CREATE INDEX "idx_login_histories_login_at" ON "loginHistories"("loginAt");
 
