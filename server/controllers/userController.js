@@ -103,6 +103,7 @@ export const inviteUser = async (req, res, next) => {
                 companyId,
                 name,
                 email, // Store email in public table too
+                type: 'user', // Invited users are company employees
                 status: 'active', // 'pending' status violates constraint
                 createdBy: adminProfile.userId
             });
@@ -219,10 +220,20 @@ export const updateUser = async (req, res, next) => {
             return res.status(403).json({ error: "Access denied" });
         }
 
-        // 2. Update Details
+        // 2. Prevent type changes (only superadmins can change type)
+        if (req.body.type) {
+            if (req.userProfile?.type !== 'superadmin') {
+                return res.status(403).json({
+                    error: "Only superadmins can change user type"
+                });
+            }
+        }
+
+        // 3. Update Details
         const updates = {};
         if (status) updates.status = status;
         if (name) updates.name = name;
+        if (req.body.type) updates.type = req.body.type; // Only if superadmin
 
         if (Object.keys(updates).length > 0) {
             const { error: updateError } = await supabase
@@ -233,7 +244,7 @@ export const updateUser = async (req, res, next) => {
             if (updateError) throw updateError;
         }
 
-        // 3. Update Role (if provided)
+        // 4. Update Role (if provided)
         if (roleId) {
             // Wipe old roles (assuming single role per user for simplicity, though schema supports many)
             await supabase.from('userRoles').delete().eq('userId', id);

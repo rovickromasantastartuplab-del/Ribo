@@ -52,6 +52,7 @@ export const loginUser = async (req, res, next) => {
         res.cookie("access_token", access_token, cookieOptions);
         res.cookie("refresh_token", refresh_token, { ...cookieOptions, maxAge: 14 * 24 * 60 * 60 * 1000 });
 
+
         // Fetch Public Profile to get companyId and Role
         let { data: publicUser, error: publicError } = await supabase
             .from('users')
@@ -61,6 +62,7 @@ export const loginUser = async (req, res, next) => {
 
         // If no public user record exists, this is first login after email confirmation
         // → Complete registration (create company, user, role, subscription, etc.)
+        // NOTE: If a superadmin was manually created, publicUser will exist and skip this
         if (publicError || !publicUser) {
             try {
                 const regResponse = await fetch(`http://localhost:${process.env.PORT || 4000}/api/registration/complete`, {
@@ -83,9 +85,17 @@ export const loginUser = async (req, res, next) => {
                         .eq('authUserId', userData.user.id)
                         .single();
                     publicUser = newUser;
+                } else {
+                    // Registration failed - return error
+                    return res.status(400).json({
+                        error: regData.error || 'Registration failed'
+                    });
                 }
             } catch (regError) {
                 console.error('Auto-registration error:', regError);
+                return res.status(500).json({
+                    error: 'Failed to complete registration'
+                });
             }
         }
 
@@ -100,6 +110,23 @@ export const loginUser = async (req, res, next) => {
             if (!companyCheck) {
                 return res.status(400).json({ error: 'Associated company record not found.' });
             }
+        }
+
+        // ✅ LOG LOGIN HISTORY
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+        const userAgent = req.headers['user-agent'] || 'unknown';
+
+        try {
+            await supabase.from('loginHistories').insert({
+                companyId: publicUser?.companyId || null,
+                userId: publicUser?.userId || userData.user.id, // Use profile ID if avail, else Auth ID
+                ip: ip,
+                userAgent: userAgent,
+                loginAt: new Date().toISOString()
+            });
+        } catch (logError) {
+            console.error("⚠️ Failed to log login history:", logError);
+            // Non-blocking: Proceed with login even if logging fails
         }
 
         const userWithProfile = {

@@ -32,18 +32,8 @@ export const getCompanyId = async (user) => {
  * Fetches the full user profile including role and permissions.
  * @param {string} userId - The PUBLIC userId (not authUserId)
  */
-export const getUserProfile = async (userId) => {
-    // Note: userId here should be the public 'userId' if 'authMiddleware' resolved it correctly
-    // But 'authMiddleware' resolves 'auth.users' object where 'id' is 'authUserId'.
-    // So we need to query by 'authUserId' if the ID looks like the Auth ID, 
-    // OR we query by 'userId' if we have the public ID.
-    // 
-    // However, our middleware `resolveUserFromAccess` returns the Auth User.
-    // So `req.user.id` is `authUserId`.
-
-    // Let's modify the query to handle the join correctly.
-    // We assume the input `userId` is the AUTH user id if passed from req.user.id
-
+export const getUserProfile = async (authUserId) => {
+    // Query user by authUserId (from req.user.id)
     const { data, error } = await supabase
         .from('users')
         .select(`
@@ -61,18 +51,26 @@ export const getUserProfile = async (userId) => {
                 )
             )
         `)
-        .eq('authUserId', userId) // Changed to match authUserId since that's what we have in req.user
+        .eq('authUserId', authUserId)
         .single();
 
     if (error) {
-        // Fallback: Maybe it WAS a public userId? 
-        // Realistically, the context middleware passes req.user.id which is Auth ID.
-        // So this change is correct.
+        console.warn(`getUserProfile: No user found for authUserId ${authUserId}`);
         return null;
     }
 
-    // Flatten permissions for easier frontend use
-    if (data && data.userRoles && data.userRoles.length > 0) {
+    // Check if user is a superadmin (bypass role checks)
+    if (data.type === 'superadmin') {
+        data.permissions = ['*']; // All permissions
+        data.role = {
+            name: 'superadmin',
+            label: 'Super Admin'
+        };
+        return data;
+    }
+
+    // For regular users, flatten permissions from roles
+    if (data.userRoles && data.userRoles.length > 0) {
         const roleData = data.userRoles[0].role;
         data.role = {
             id: roleData.id,

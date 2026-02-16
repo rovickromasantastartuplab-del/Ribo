@@ -23,7 +23,12 @@ export const checkLimit = (limitKey) => {
                 });
             }
 
-            // 2. Resolve Company ID (Dynamic fetch if missing from JWT)
+            // 2. Superadmin Bypass - Superadmins have unlimited access
+            if (req.userProfile?.type === 'superadmin') {
+                return next(); // Skip all plan checks
+            }
+
+            // 3. Resolve Company ID (Dynamic fetch if missing from JWT)
             // Optimization: If 'authorize' middleware ran before this, use the cached profile.
             // This prevents a redundant DB call.
             const companyId = req.userProfile?.companyId || await getCompanyId(req.user);

@@ -80,7 +80,8 @@ export const completeRegistration = async (req, res) => {
                 authUserId: user.id,
                 companyId: company.companyId,
                 name: name || email.split('@')[0],
-                email: email
+                email: email,
+                type: 'company' // Company owner type
             })
             .select()
             .single();
