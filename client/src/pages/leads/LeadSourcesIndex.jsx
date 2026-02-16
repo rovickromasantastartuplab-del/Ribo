@@ -19,6 +19,7 @@ export default function LeadSourcesIndex() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedStatus, setSelectedStatus] = useState('all');
     const [showFilters, setShowFilters] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -49,7 +50,14 @@ export default function LeadSourcesIndex() {
 
             const items = responseData.data || [];
 
-            setData(Array.isArray(items) ? items : []);
+            // Transform data to add 'id' field for CrudTable compatibility
+            const transformedItems = items.map(item => ({
+                ...item,
+                id: item.leadSourceId, // Map leadSourceId to id
+                created_at: item.createdAt // Map createdAt to created_at for display
+            }));
+
+            setData(Array.isArray(transformedItems) ? transformedItems : []);
             setTotalItems(responseData.total || 0);
             setTotalPages(responseData.last_page || 1);
             setFromItem(responseData.from || 0);
@@ -125,7 +133,10 @@ export default function LeadSourcesIndex() {
     };
 
     const handleFormSubmit = async (formData) => {
+        if (isSubmitting) return; // Prevent duplicate submissions
+
         try {
+            setIsSubmitting(true);
             if (formMode === 'create') {
                 toast.loading(t('Creating lead source...'));
                 await leadSourceService.create(formData);
@@ -141,12 +152,16 @@ export default function LeadSourcesIndex() {
             const msg = error.response?.data?.message || t('Operation failed');
             toast.error(msg);
         } finally {
+            setIsSubmitting(false);
             toast.dismiss();
         }
     };
 
     const handleDeleteConfirm = async () => {
+        if (isSubmitting) return; // Prevent duplicate deletions
+
         try {
+            setIsSubmitting(true);
             toast.loading(t('Deleting lead source...'));
             await leadSourceService.delete(currentItem.id);
             toast.success(t('Lead source deleted successfully'));
@@ -156,12 +171,16 @@ export default function LeadSourcesIndex() {
             const msg = error.response?.data?.message || t('Delete failed');
             toast.error(msg);
         } finally {
+            setIsSubmitting(false);
             toast.dismiss();
         }
     };
 
     const handleToggleStatus = async (item) => {
+        if (isSubmitting) return; // Prevent duplicate toggles
+
         try {
+            setIsSubmitting(true);
             const newStatus = item.status === 'active' ? 'inactive' : 'active';
             toast.loading(`${newStatus === 'active' ? t('Activating') : t('Deactivating')} lead source...`);
             await leadSourceService.update(item.id, { status: newStatus });
@@ -171,6 +190,7 @@ export default function LeadSourcesIndex() {
             const msg = error.response?.data?.message || t('Status update failed');
             toast.error(msg);
         } finally {
+            setIsSubmitting(false);
             toast.dismiss();
         }
     };
@@ -203,7 +223,7 @@ export default function LeadSourcesIndex() {
             key: 'created_at',
             label: t('Created At'),
             sortable: true,
-            type: 'date'
+            render: (value) => value ? new Date(value).toLocaleDateString() : '-'
         }
     ];
 
@@ -286,6 +306,7 @@ export default function LeadSourcesIndex() {
                 isOpen={isFormModalOpen}
                 onClose={() => setIsFormModalOpen(false)}
                 onSubmit={handleFormSubmit}
+                isSubmitting={isSubmitting}
                 formConfig={{
                     fields: [
                         { name: 'name', label: t('Source Name'), type: 'text', required: true },

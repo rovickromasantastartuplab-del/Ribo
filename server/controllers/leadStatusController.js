@@ -11,7 +11,7 @@ export const getLeadStatuses = async (req, res, next) => {
 
         let query = supabase
             .from('leadStatuses')
-            .select('leadStatusId, name, color, description, status')
+            .select('leadStatusId, name, color, description, status, createdAt')
             .eq('companyId', companyId);
 
         if (status) {

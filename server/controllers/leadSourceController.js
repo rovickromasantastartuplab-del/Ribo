@@ -7,7 +7,7 @@ export const getLeadSources = async (req, res, next) => {
 
         let query = supabase
             .from('leadSources')
-            .select('leadSourceId, name, description, status')
+            .select('leadSourceId, name, description, status, createdAt')
             .eq('companyId', companyId);
 
         if (status) query = query.eq('status', status);

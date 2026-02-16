@@ -241,6 +241,36 @@ export function CrudFormModal({
                     />
                 );
 
+            case 'color':
+                return (
+                    <div className="flex items-center gap-3">
+                        <Input
+                            id={field.name}
+                            name={field.name}
+                            type="color"
+                            value={formData[field.name] || field.defaultValue || '#3B82F6'}
+                            onChange={(e) => handleChange(field.name, e.target.value)}
+                            required={field.required}
+                            className={`h-10 w-20 cursor-pointer ${errors[field.name] ? 'border-red-500' : ''}`}
+                            disabled={mode === 'view'}
+                        />
+                        <Input
+                            type="text"
+                            value={formData[field.name] || field.defaultValue || '#3B82F6'}
+                            onChange={(e) => {
+                                // Validate hex color format
+                                const value = e.target.value;
+                                if (value.match(/^#[0-9A-Fa-f]{0,6}$/)) {
+                                    handleChange(field.name, value);
+                                }
+                            }}
+                            placeholder="#3B82F6"
+                            className={`flex-1 ${errors[field.name] ? 'border-red-500' : ''}`}
+                            disabled={mode === 'view'}
+                        />
+                    </div>
+                );
+
             case 'date':
                 // Format date value for input (YYYY-MM-DD format)
                 const dateValue = formData[field.name] ?

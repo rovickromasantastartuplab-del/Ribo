@@ -14,7 +14,9 @@ import { useTranslation } from 'react-i18next';
 import { Pagination } from '@/components/ui/pagination';
 import { SearchAndFilterBar } from '@/components/ui/search-and-filter-bar';
 import { useInitials } from '@/hooks/use-initials';
-import axios from 'axios';
+import leadsAPI from '@/api/leads';
+import configAPI from '@/api/config';
+import usersAPI from '@/api/users';
 import { formatCurrency, formatDateTime } from '@/lib/utils';
 
 export default function LeadsIndex() {
@@ -56,19 +58,45 @@ export default function LeadsIndex() {
     const [formMode, setFormMode] = useState('create');
     const [isLoadingKanban, setIsLoadingKanban] = useState(false);
     const [kanbanData, setKanbanData] = useState(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Fetch Dependencies
     useEffect(() => {
         const fetchDependencies = async () => {
             try {
                 const [statusesRes, sourcesRes, usersRes] = await Promise.all([
-                    axios.get('/api/lead-config/statuses?per_page=100').catch(() => ({ data: { data: [] } })),
-                    axios.get('/api/lead-config/sources?per_page=100').catch(() => ({ data: { data: [] } })),
-                    axios.get('/api/users?per_page=100').catch(() => ({ data: { data: [] } }))
+                    configAPI.getLeadStatuses().catch(() => ({ data: [] })),
+                    configAPI.getLeadSources().catch(() => ({ data: [] })),
+                    usersAPI.getUsers({ limit: 100 }).catch(() => ({ data: [] }))
                 ]);
-                setLeadStatuses(statusesRes.data.data || []);
-                setLeadSources(sourcesRes.data.data || []);
-                setUsers(usersRes.data.data || []);
+
+                console.log('Lead Statuses Response:', statusesRes);
+                console.log('Lead Sources Response:', sourcesRes);
+                console.log('Users Response:', usersRes);
+
+                // Transform data to add consistent 'id' field for dropdowns
+                const statuses = (statusesRes.data || []).map(s => ({
+                    ...s,
+                    id: s.leadStatusId || s.id
+                }));
+
+                const sources = (sourcesRes.data || []).map(s => ({
+                    ...s,
+                    id: s.leadSourceId || s.id
+                }));
+
+                const userList = (usersRes.data || []).map(u => ({
+                    ...u,
+                    id: u.userId || u.id
+                }));
+
+                console.log('Transformed Statuses:', statuses);
+                console.log('Transformed Sources:', sources);
+                console.log('Transformed Users:', userList);
+
+                setLeadStatuses(statuses);
+                setLeadSources(sources);
+                setUsers(userList);
             } catch (error) {
                 console.error("Failed to fetch dependencies", error);
             }
@@ -83,37 +111,40 @@ export default function LeadsIndex() {
         try {
             const params = {
                 page: currentPage,
-                per_page: perPage,
+                limit: perPage,
                 search: searchTerm,
-                lead_status_id: selectedLeadStatus !== 'all' ? selectedLeadStatus : undefined,
-                lead_source_id: selectedLeadSource !== 'all' ? selectedLeadSource : undefined,
-                status: selectedStatus !== 'all' ? selectedStatus : undefined,
-                is_converted: selectedConverted !== 'all' ? selectedConverted : undefined,
-                assigned_to: selectedAssignee !== 'all' ? selectedAssignee : undefined
+                status: selectedLeadStatus !== 'all' ? selectedLeadStatus : undefined,
+                source: selectedLeadSource !== 'all' ? selectedLeadSource : undefined
             };
-            const response = await axios.get('/api/leads', { params });
-            const responseData = response.data;
-            const items = responseData.data || [];
+            const response = await leadsAPI.getLeads(params);
+            const items = response.data || [];
 
-            // Transform data to handle assigned_users if backend returns assigned_user
+            // Transform data - backend returns assignees array and different field names
             const transformedItems = items.map(item => ({
                 ...item,
-                assigned_users: item.assigned_users || (item.assigned_user ? [item.assigned_user] : [])
+                id: item.leadId,
+                company: item.companyName || item.company, // Map companyName to company
+                assigned_users: item.assignees || [],
+                // Ensure lead_status is properly structured for display
+                lead_status: item.leadStatus ? {
+                    name: item.leadStatus.name,
+                    color: item.leadStatus.color
+                } : (item.lead_status || null)
             }));
 
             setData(Array.isArray(transformedItems) ? transformedItems : []);
-            setTotalItems(responseData.total || 0);
-            setTotalPages(responseData.last_page || 1);
-            setFromItem(responseData.from || 0);
-            setToItem(responseData.to || 0);
+            setTotalItems(response.pagination?.total || 0);
+            setTotalPages(response.pagination?.totalPages || 1);
+            setFromItem((response.pagination?.page - 1) * response.pagination?.limit + 1 || 0);
+            setToItem(Math.min(response.pagination?.page * response.pagination?.limit, response.pagination?.total) || 0);
 
             // Structure Kanban Data
             if (leadStatuses.length > 0) {
                 const structuredData = {};
                 leadStatuses.forEach(status => {
-                    structuredData[status.id] = {
+                    structuredData[status.leadStatusId] = {
                         status: status,
-                        items: items.filter(lead => (lead.lead_status?.id || lead.lead_status_id) === status.id)
+                        items: transformedItems.filter(lead => lead.leadStatusId === status.leadStatusId)
                     };
                 });
                 setKanbanData(structuredData);
@@ -160,27 +191,46 @@ export default function LeadsIndex() {
     };
 
     const handleToggleStatus = async (item) => {
+        if (isSubmitting) return;
+
         try {
+            setIsSubmitting(true);
             const newStatus = item.status === 'active' ? 'inactive' : 'active';
             toast.loading(t('Updating status...'));
-            await axios.put(`/api/leads/${item.id}`, { ...item, status: newStatus });
+            await leadsAPI.updateLead(item.id, { status: newStatus });
             toast.success(t('Status updated successfully'));
             fetchData();
         } catch (error) {
             toast.error(t('Status update failed'));
         } finally {
+            setIsSubmitting(false);
             toast.dismiss();
         }
     };
 
     const handleFormSubmit = async (formData) => {
+        if (isSubmitting) return;
+
         try {
+            setIsSubmitting(true);
             toast.loading(t('Saving...'));
+            // Map form data to backend format
+            const apiData = {
+                name: formData.name,
+                email: formData.email,
+                phone: formData.phone,
+                companyName: formData.company,
+                leadStatusId: formData.lead_status_id,
+                leadSourceId: formData.lead_source_id,
+                assignees: formData.assigned_to || [],
+                notes: formData.notes
+            };
+
             if (formMode === 'create') {
-                await axios.post('/api/leads', formData);
+                await leadsAPI.createLead(apiData);
                 toast.success(t('Lead created successfully'));
             } else {
-                await axios.put(`/api/leads/${currentItem.id}`, formData);
+                await leadsAPI.updateLead(currentItem.id, apiData);
                 toast.success(t('Lead updated successfully'));
             }
             setIsFormModalOpen(false);
@@ -188,21 +238,29 @@ export default function LeadsIndex() {
         } catch (error) {
             toast.error(t('Save failed'));
         } finally {
+            setIsSubmitting(false);
             toast.dismiss();
         }
     };
 
     const handleConvertConfirm = async (lead, type, data) => {
+        if (isSubmitting) return;
+
         try {
+            setIsSubmitting(true);
             toast.loading(t(`Converting to ${type}...`));
-            const endpoint = type === 'account' ? `/api/leads/${lead.id}/convert-to-account` : `/api/leads/${lead.id}/convert-to-contact`;
-            await axios.post(endpoint, data);
+            if (type === 'account') {
+                await leadsAPI.convertToAccount(lead.id, data);
+            } else {
+                await leadsAPI.convertToContact(lead.id, data);
+            }
             toast.success(t(`Converted to ${type} successfully`));
             setIsConvertModalOpen(false);
             fetchData();
         } catch (error) {
             toast.error(t('Conversion failed'));
         } finally {
+            setIsSubmitting(false);
             toast.dismiss();
         }
     };
@@ -218,7 +276,7 @@ export default function LeadsIndex() {
         if (leadId) {
             try {
                 toast.loading(t('Updating status...'));
-                await axios.put(`/api/leads/${leadId}`, { lead_status_id: statusId });
+                await leadsAPI.updateLead(leadId, { leadStatusId: statusId });
                 toast.success(t('Status updated'));
                 fetchData();
             } catch (error) {
@@ -299,8 +357,8 @@ export default function LeadsIndex() {
                     onSearchChange={setSearchTerm}
                     onSearch={(e) => { e.preventDefault(); setCurrentPage(1); fetchData(); }}
                     filters={[
-                        { name: 'lead_status_id', label: t('Lead Status'), type: 'select', value: selectedLeadStatus, onChange: setSelectedLeadStatus, options: [{ value: 'all', label: t('All Statuses') }, ...leadStatuses.map(s => ({ value: s.id.toString(), label: s.name }))] },
-                        { name: 'lead_source_id', label: t('Lead Source'), type: 'select', value: selectedLeadSource, onChange: setSelectedLeadSource, options: [{ value: 'all', label: t('All Sources') }, ...leadSources.map(s => ({ value: s.id.toString(), label: s.name }))] },
+                        { name: 'lead_status_id', label: t('Lead Status'), type: 'select', value: selectedLeadStatus, onChange: setSelectedLeadStatus, options: [{ value: 'all', label: t('All Statuses') }, ...leadStatuses.map(s => ({ value: s.leadStatusId?.toString() || s.id?.toString(), label: s.name }))] },
+                        { name: 'lead_source_id', label: t('Lead Source'), type: 'select', value: selectedLeadSource, onChange: setSelectedLeadSource, options: [{ value: 'all', label: t('All Sources') }, ...leadSources.map(s => ({ value: s.leadSourceId?.toString() || s.id?.toString(), label: s.name }))] },
                         { name: 'status', label: t('Status'), type: 'select', value: selectedStatus, onChange: setSelectedStatus, options: [{ value: 'all', label: t('All Status') }, { value: 'active', label: t('Active') }, { value: 'inactive', label: t('Inactive') }] },
                         { name: 'is_converted', label: t('Converted'), type: 'select', value: selectedConverted, onChange: setSelectedConverted, options: [{ value: 'all', label: t('All') }, { value: '1', label: t('Converted') }, { value: '0', label: t('Not Converted') }] },
                         { name: 'assigned_to', label: t('Assigned To'), type: 'select', value: selectedAssignee, onChange: setSelectedAssignee, options: [{ value: 'all', label: t('All Users') }, ...users.map(u => ({ value: u.id.toString(), label: u.name }))] }
@@ -341,9 +399,9 @@ export default function LeadsIndex() {
                         ) : (
                             <div className="flex gap-4 overflow-x-auto pb-4 kanban-scroll" style={{ height: 'calc(100vh - 280px)' }}>
                                 {leadStatuses.map((status) => {
-                                    const statusLeads = kanbanData?.[status.id]?.items || [];
+                                    const statusLeads = kanbanData?.[status.leadStatusId]?.items || [];
                                     return (
-                                        <div key={status.id} className="flex-shrink-0 w-[300px]" onDrop={(e) => handleDrop(e, status.id)} onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('bg-blue-50'); }} onDragLeave={(e) => e.currentTarget.classList.remove('bg-blue-50')}>
+                                        <div key={status.leadStatusId} className="flex-shrink-0 w-[300px]" onDrop={(e) => handleDrop(e, status.leadStatusId)} onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('bg-blue-50'); }} onDragLeave={(e) => e.currentTarget.classList.remove('bg-blue-50')}>
                                             <div className="bg-gray-100 rounded-lg h-full flex flex-col">
                                                 <div className="p-3 border-b border-gray-200">
                                                     <div className="flex items-center justify-between mb-2">
@@ -353,7 +411,7 @@ export default function LeadsIndex() {
                                                         </div>
                                                         <span className="text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded-full">{statusLeads.length}</span>
                                                     </div>
-                                                    <Button variant="outline" size="sm" className="w-full text-xs border-dashed" onClick={() => { setCurrentItem({ lead_status_id: status.id }); setFormMode('create'); setIsFormModalOpen(true); }}><Plus className="h-3 w-3 mr-1" />{t('Add Lead')}</Button>
+                                                    <Button variant="outline" size="sm" className="w-full text-xs border-dashed" onClick={() => { setCurrentItem({ lead_status_id: status.leadStatusId }); setFormMode('create'); setIsFormModalOpen(true); }}><Plus className="h-3 w-3 mr-1" />{t('Add Lead')}</Button>
                                                 </div>
                                                 <div className="p-2 space-y-2 overflow-y-auto flex-1">
                                                     {statusLeads.map((lead) => (
@@ -425,6 +483,7 @@ export default function LeadsIndex() {
                 isOpen={isFormModalOpen}
                 onClose={() => setIsFormModalOpen(false)}
                 onSubmit={handleFormSubmit}
+                isSubmitting={isSubmitting}
                 formConfig={{
                     fields: [
                         { name: 'name', label: t('Name'), type: 'text', required: true },
@@ -432,9 +491,9 @@ export default function LeadsIndex() {
                         { name: 'phone', label: t('Phone'), type: 'text' },
                         { name: 'company', label: t('Company'), type: 'text' },
                         { name: 'value', label: t('Value'), type: 'number', step: '0.01' },
-                        { name: 'lead_status_id', label: t('Lead Status'), type: 'select', options: leadStatuses.map(s => ({ value: s.id, label: s.name })), required: true },
-                        { name: 'lead_source_id', label: t('Source'), type: 'select', options: leadSources.map(s => ({ value: s.id, label: s.name })) },
-                        { name: 'assigned_to', label: t('Assign To'), type: 'multi-select', options: users.map(u => ({ value: u.id, label: `${u.name} (${u.email})` })) },
+                        { name: 'lead_status_id', label: `${t('Lead Status')} [${leadStatuses.length} items]`, type: 'select', options: leadStatuses.map(s => ({ value: s.id, label: s.name })), required: true },
+                        { name: 'lead_source_id', label: `${t('Source')} [${leadSources.length} items]`, type: 'select', options: leadSources.map(s => ({ value: s.id, label: s.name })) },
+                        { name: 'assigned_to', label: `${t('Assign To')} [${users.length} items]`, type: 'multi-select', options: users.map(u => ({ value: u.id, label: `${u.name} (${u.email})` })) },
                         { name: 'address', label: t('Address'), type: 'textarea' },
                         { name: 'notes', label: t('Notes'), type: 'textarea' },
                         { name: 'status', label: t('Status'), type: 'select', options: [{ value: 'active', label: t('Active') }, { value: 'inactive', label: t('Inactive') }], defaultValue: 'active' }

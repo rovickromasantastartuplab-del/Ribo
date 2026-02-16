@@ -33,7 +33,14 @@ export default function RolesIndex() {
             const rolesData = await roleService.getAll();
             // Backend returns { success: true, data: [...] } or just [...]
             const data = rolesData.data || rolesData;
-            setRoles(Array.isArray(data) ? data : []);
+
+            // Transform data to add 'id' field for CrudTable compatibility
+            const transformedRoles = Array.isArray(data) ? data.map(role => ({
+                ...role,
+                id: role.roleId // Map roleId to id
+            })) : [];
+
+            setRoles(transformedRoles);
 
             // Fetch permissions for the form
             // Legacy uses /roles/permissions or similar
