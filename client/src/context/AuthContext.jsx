@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import api from '../services/api';
+import { supabase } from '../supabaseClient';
 
 const AuthContext = createContext();
 
@@ -9,9 +9,10 @@ export const AuthProvider = ({ children }) => {
 
     const checkUser = async () => {
         try {
-            const { data } = await api.get('/auth/me');
-            setUser(data.user);
+            const { data: { session } } = await supabase.auth.getSession();
+            setUser(session?.user ?? null);
         } catch (error) {
+            console.error('Error checking user:', error);
             setUser(null);
         } finally {
             setLoading(false);
@@ -20,16 +21,29 @@ export const AuthProvider = ({ children }) => {
 
     useEffect(() => {
         checkUser();
+
+        // Listen for auth changes
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setUser(session?.user ?? null);
+        });
+
+        return () => subscription.unsubscribe();
     }, []);
 
     const login = async (email, password) => {
-        const { data } = await api.post('/auth/login', { email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+        });
+
+        if (error) throw error;
+
         setUser(data.user);
         return data;
     };
 
     const logout = async () => {
-        await api.post('/auth/logout');
+        await supabase.auth.signOut();
         setUser(null);
         window.location.href = '/login';
     };

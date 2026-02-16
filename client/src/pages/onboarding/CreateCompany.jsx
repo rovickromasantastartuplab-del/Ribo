@@ -1,96 +1,111 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api from '../../services/api';
-import { Building2, Loader2, CheckCircle } from 'lucide-react';
+import { Building2 } from 'lucide-react';
+import InputError from '@/components/InputError';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import AuthLayout from '@/layouts/AuthLayout';
+import AuthButton from '@/components/auth/AuthButton';
+import { useBrand } from '@/contexts/BrandContext';
+import { THEME_COLORS } from '@/hooks/use-appearance';
 
-const CreateCompany = () => {
-    const [companyName, setCompanyName] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
+export default function CreateCompany() {
     const navigate = useNavigate();
+    const [companyName, setCompanyName] = useState('');
+    const [processing, setProcessing] = useState(false);
+    const [errors, setErrors] = useState({});
+    const { themeColor, customColor } = useBrand();
+    const primaryColor = themeColor === 'custom' ? customColor : THEME_COLORS[themeColor];
 
-    const handleSubmit = async (e) => {
+    const submit = async (e) => {
         e.preventDefault();
-        if (!companyName.trim()) return;
+        setProcessing(true);
+        setErrors({});
 
-        setLoading(true);
-        setError('');
+        // Validation
+        if (!companyName.trim()) {
+            setErrors({ companyName: 'Company name is required' });
+            setProcessing(false);
+            return;
+        }
+
+        if (companyName.trim().length < 2) {
+            setErrors({ companyName: 'Company name must be at least 2 characters' });
+            setProcessing(false);
+            return;
+        }
+
+        if (companyName.trim().length > 100) {
+            setErrors({ companyName: 'Company name must not exceed 100 characters' });
+            setProcessing(false);
+            return;
+        }
 
         try {
-            // Call the Backend Onboarding API
-            const response = await api.post('/companies', {
-                name: companyName
-            });
+            // Save company data to localStorage (frontend-only)
+            const companyData = {
+                company_name: companyName.trim(),
+                onboarding_completed: true,
+                created_at: new Date().toISOString()
+            };
 
-            console.log('Onboarding Success:', response.data);
+            localStorage.setItem('user_company', JSON.stringify(companyData));
 
-            // Redirect to Dashboard
-            // Might need to refresh user context? For now just redirect.
+            // Redirect to dashboard
             navigate('/');
-            // Force reload to update AuthContext with new CompanyId/Role if needed? 
-            // Better: Context should update. But reload is safer for MVP.
-            window.location.reload();
-
-        } catch (err) {
-            console.error(err);
-            setError(err.response?.data?.error || 'Failed to create company');
-            setLoading(false);
+        } catch (error) {
+            setErrors({ general: error.message || 'An error occurred while creating your workspace' });
+            setProcessing(false);
         }
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-            <div className="max-w-lg w-full bg-white p-10 rounded-xl shadow-lg border border-gray-100">
-                <div className="text-center mb-8">
-                    <div className="mx-auto bg-indigo-100 w-16 h-16 rounded-full flex items-center justify-center mb-4">
-                        <Building2 className="h-8 w-8 text-indigo-600" />
+        <AuthLayout
+            title="Name your workspace"
+            description="This will be your shared workspace. You can change it later."
+            icon={<Building2 className="h-8 w-8" style={{ color: primaryColor }} />}
+        >
+            <form className="space-y-5" onSubmit={submit}>
+                <div className="space-y-4">
+                    <div className="relative">
+                        <Label htmlFor="companyName" className="text-gray-700 dark:text-gray-300 font-medium mb-2 block">
+                            Company / Workspace Name
+                        </Label>
+                        <div className="relative">
+                            <Input
+                                id="companyName"
+                                type="text"
+                                required
+                                autoFocus
+                                tabIndex={1}
+                                value={companyName}
+                                onChange={(e) => setCompanyName(e.target.value)}
+                                placeholder="e.g. Acme Corp, Ribo Tech, My Design Studio"
+                            />
+                        </div>
+                        <InputError message={errors.companyName} />
                     </div>
-                    <h2 className="text-3xl font-extrabold text-gray-900">Name your Company</h2>
-                    <p className="mt-2 text-gray-600">
-                        This will be your shared workspace. You can change it later.
-                    </p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="space-y-6">
-                    <div>
-                        <label htmlFor="companyName" className="block text-sm font-medium text-gray-700 mb-2">
-                            Company / Workspace Name
-                        </label>
-                        <input
-                            type="text"
-                            id="companyName"
-                            className="block w-full px-4 py-3 border border-gray-300 rounded-lg placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                            placeholder="e.g. Acme Corp, Ribo Tech, My Design Studio"
-                            value={companyName}
-                            onChange={(e) => setCompanyName(e.target.value)}
-                            required
-                        />
+                {errors.general && (
+                    <div className="text-sm text-red-600 dark:text-red-400 text-center bg-red-50 dark:bg-red-900/20 p-3 rounded-lg border border-red-200 dark:border-red-800">
+                        {errors.general}
                     </div>
+                )}
 
-                    {error && (
-                        <div className="text-red-500 text-sm bg-red-50 p-3 rounded-md">
-                            {error}
-                        </div>
-                    )}
+                <AuthButton
+                    tabIndex={2}
+                    processing={processing}
+                >
+                    Create workspace
+                </AuthButton>
 
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 transition-all"
-                    >
-                        {loading ? (
-                            <>
-                                <Loader2 className="animate-spin -ml-1 mr-2 h-5 w-5" />
-                                Setting up your office...
-                            </>
-                        ) : (
-                            'Create Workspace'
-                        )}
-                    </button>
-                </form>
-            </div>
-        </div>
+                <div className="text-center pt-2">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Your workspace will be created and you'll be redirected to your dashboard
+                    </p>
+                </div>
+            </form>
+        </AuthLayout>
     );
-};
-
-export default CreateCompany;
+}
